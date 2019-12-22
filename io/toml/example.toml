@@ -1,0 +1,7 @@
+[default]
+aws_access_key_id = EXAMPLEAWSACCESSKEY1
+aws_secret_access_key = 0-9A-Za-z!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+
+[profile1 hoge]
+aws_access_key_id = EXAMPLEAWSACCESSKEY2
+aws_secret_access_key = 0-9A-Za-z!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
