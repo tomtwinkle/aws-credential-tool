@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -75,12 +76,26 @@ func (t *toml) WriteFile(fpath string, model *Model) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	tmpPath := fp.Name()
 	if model == nil {
 		return errors.New("model is nil.")
 	}
 	str := t.modelToToml(model)
 
 	if _, err := fp.WriteString(str); err != nil {
+		return errors.WithStack(err)
+	}
+	if err := fp.Close(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if _, err := os.Stat(fpath); err != nil {
+		return errors.WithStack(err)
+	}
+	if err = os.Remove(fpath); err != nil {
+		return errors.WithStack(err)
+	}
+	if err := os.Rename(tmpPath, fpath); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

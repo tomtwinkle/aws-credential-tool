@@ -208,7 +208,6 @@ func (p *profile) tomlConfigs(configs []*Config) (*toml.Model, error) {
 	var t = new(toml.Model)
 	t.Tables = make([]*toml.Table, len(configs))
 	for i, config := range configs {
-		fmt.Printf("config=%+v\n", config)
 		if config == nil {
 			continue
 		}
