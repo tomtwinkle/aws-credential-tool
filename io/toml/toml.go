@@ -106,7 +106,7 @@ func (t *toml) modelToToml(model *Model) string {
 	for _, t := range model.Tables {
 		result = append(result, fmt.Sprintf("[%s]", t.Name))
 		for _, c := range t.Configs {
-			result = append(result, fmt.Sprintf("%s=%s", c.Key, c.Value))
+			result = append(result, fmt.Sprintf("%s = %s", c.Key, c.Value))
 		}
 	}
 	result = append(result, "")
