@@ -27,7 +27,7 @@ type BuildEnv struct {
 }
 
 func makeGzip(filePath string) error {
-	fmt.Printf("make compress gzip %s\n", filePath)
+	fmt.Printf("make compress %s.gz\n", filePath)
 	orgfile, err := ioutil.ReadFile(filePath)
 
 	gfile, err := os.Create(fmt.Sprintf("%s.gz", filePath))
@@ -48,7 +48,7 @@ func makeGzip(filePath string) error {
 }
 
 func makeZip(filePath string) error {
-	fmt.Printf("make compress zip %s\n", filePath)
+	fmt.Printf("make compress %s.zip\n", filePath)
 	fileToZip, err := os.Open(filePath)
 	if err != nil {
 		return errors.WithStack(err)

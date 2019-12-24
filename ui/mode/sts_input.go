@@ -23,17 +23,17 @@ func NewModeSTS(accessKey string, secretKey string, region string) STSInput {
 
 func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
 	serialNumber, err := s.inputSerialNumber()
-	if err == nil {
+	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
 	user, err := s.inputUser()
-	if err == nil {
+	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
 	token, err := s.inputToken()
-	if err == nil {
+	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
@@ -41,6 +41,8 @@ func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+
+	fmt.Println("Success get session token.")
 
 	return sToken, nil
 }
