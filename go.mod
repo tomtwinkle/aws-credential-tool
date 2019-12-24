@@ -5,7 +5,6 @@ go 1.13
 require (
 	github.com/aws/aws-sdk-go v1.26.7
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
-	github.com/gizak/termui/v3 v3.1.0
 	github.com/manifoldco/promptui v0.6.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/errors v0.8.1
