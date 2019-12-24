@@ -1,3 +1,6 @@
+# build
+builds
+
 # Editor
 .idea
 
@@ -8,7 +11,7 @@
 *.so
 *.dylib
 *.zip
-*.gzip
+*.gz
 
 # Test binary, built with `go test -c`
 *.test
