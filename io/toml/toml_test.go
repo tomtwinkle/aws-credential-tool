@@ -13,12 +13,12 @@ func TestToml_DecodeFile(t *testing.T) {
 			[]*Table{
 				{
 					Name: "default",
-					Configs: map[string]*Config{
-						"aws_access_key_id": {
+					Configs: []*Config{
+						{
 							Key:   "aws_access_key_id",
 							Value: "EXAMPLEAWSACCESSKEY1",
 						},
-						"aws_secret_access_key": {
+						{
 							Key:   "aws_secret_access_key",
 							Value: "0-9A-Za-z!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
 						},
@@ -26,12 +26,12 @@ func TestToml_DecodeFile(t *testing.T) {
 				},
 				{
 					Name: "profile1 hoge",
-					Configs: map[string]*Config{
-						"aws_access_key_id": {
+					Configs: []*Config{
+						{
 							Key:   "aws_access_key_id",
 							Value: "EXAMPLEAWSACCESSKEY2",
 						},
-						"aws_secret_access_key": {
+						{
 							Key:   "aws_secret_access_key",
 							Value: "0-9A-Za-z!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
 						},

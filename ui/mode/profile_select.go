@@ -2,12 +2,14 @@ package mode
 
 import (
 	"aws-credential-tool/io/profile"
-	"aws-credential-tool/ui/model"
 	"fmt"
+	"github.com/chzyer/readline"
+	"github.com/manifoldco/promptui"
+	"github.com/pkg/errors"
 )
 
 type ProfileSelect interface {
-	RenderData() (*model.Model, error)
+	Select() (string, error)
 }
 
 type profileSelect struct {
@@ -18,13 +20,27 @@ func NewModeProfileSelect(mProfile *profile.Model) ProfileSelect {
 	return &profileSelect{mProfile: mProfile}
 }
 
-func (l *profileSelect) RenderData() (*model.Model, error) {
-	var uiModel = new(model.Model)
-	// render list
-	uiModel.ListTitle = "Credentials"
-	uiModel.ListData = make([]string, len(l.mProfile.Credentials))
-	for idx, credectial := range l.mProfile.Credentials {
-		uiModel.ListData[idx] = fmt.Sprintf("[%d] %s", idx, credectial.Name)
+func (l *profileSelect) Select() (string, error) {
+	var profiles = make([]string, len(l.mProfile.Credentials))
+	for i, p := range l.mProfile.Credentials {
+		profiles[i] = p.Name
 	}
-	return uiModel, nil
+
+	prompt := promptui.Select{
+		Keys: &promptui.SelectKeys{
+			Next: promptui.Key{Code: readline.CharNext, Display: "↓"},
+			Prev: promptui.Key{Code: readline.CharPrev, Display: "↑"},
+		},
+		Label:     "Select Profile",
+		Items:     profiles,
+	}
+
+	_, result, err := prompt.Run()
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return "", errors.WithStack(err)
+	}
+
+	fmt.Printf("choose profile [%q]\n", result)
+	return result, nil
 }

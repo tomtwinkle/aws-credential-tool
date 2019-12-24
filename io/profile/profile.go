@@ -10,7 +10,9 @@ import (
 
 type Profile interface {
 	Load() (*Model, error)
-	SetDefault(model *Model, profile string) error
+	SetDefault(model *Model) error
+	Credential(model *Model, profile string) (*Credential, error)
+	Config(model *Model, profile string) (*Config, error)
 }
 
 type profile struct {
@@ -29,9 +31,10 @@ type Config struct {
 }
 
 type Credential struct {
-	Name      string
-	AccessKey string
-	SecretKey string
+	Name         string
+	AccessKey    string
+	SecretKey    string
+	SessionToken string
 }
 
 func NewProfile() Profile {
@@ -69,21 +72,41 @@ func (p *profile) Load() (*Model, error) {
 	}, nil
 }
 
-func (p *profile) SetDefault(model *Model, profile string) error {
+func (p *profile) Credential(model *Model, profile string) (*Credential, error) {
 	if profile == "default" {
-		return nil
+		return model.Credentials[0], nil
 	}
+	for _, c := range model.Credentials {
+		if c.Name == profile {
+			return c, nil
+		}
+	}
+	return nil, errors.New(fmt.Sprintf("profile not found. [%s]", profile))
+}
 
+func (p *profile) Config(model *Model, profile string) (*Config, error) {
+	if profile == "default" {
+		return model.Configs[0], nil
+	}
+	for _, c := range model.Configs {
+		if c.Name == fmt.Sprintf("profile %s", profile) {
+			return c, nil
+		}
+	}
+	return nil, errors.New(fmt.Sprintf("profile not found. [%s]", profile))
+}
+
+func (p *profile) SetDefault(model *Model) error {
 	configPath, crePath, err := p.profilePath()
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	if err := p.writeConfig(configPath, model, profile); err != nil {
+	if err := p.writeConfig(configPath, model); err != nil {
 		return errors.WithStack(err)
 	}
 
-	if err := p.writeCredential(crePath, model, profile); err != nil {
+	if err := p.writeCredential(crePath, model); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -152,21 +175,8 @@ func (p *profile) mappingCredentials(t *toml.Model) ([]*Credential, error) {
 	return credentials, nil
 }
 
-func (p *profile) writeConfig(fpath string, model *Model, profile string) error {
-	var wConfigs = make([]*Config, len(model.Configs))
-	for i := 1; i < len(model.Configs); i++ {
-		config := model.Configs[i]
-		wConfigs[i] = config
-		if config.Name == fmt.Sprintf("profile %s", profile) {
-			wConfigs[0] = &Config{
-				Name:   "default",
-				Region: config.Region,
-				Output: config.Output,
-			}
-		}
-	}
-
-	tConfig, err := p.tomlConfigs(wConfigs)
+func (p *profile) writeConfig(fpath string, model *Model) error {
+	tConfig, err := p.tomlConfigs(model.Configs)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -177,20 +187,8 @@ func (p *profile) writeConfig(fpath string, model *Model, profile string) error 
 	return nil
 }
 
-func (p *profile) writeCredential(fpath string, model *Model, profile string) error {
-	var wCredentials = make([]*Credential, len(model.Credentials))
-	for i := 1; i < len(model.Credentials); i++ {
-		credential := model.Credentials[i]
-		wCredentials[i] = credential
-		if credential.Name == profile {
-			wCredentials[0] = &Credential{
-				Name:      "default",
-				AccessKey: credential.AccessKey,
-				SecretKey: credential.SecretKey,
-			}
-		}
-	}
-	tCredential, err := p.tomlCredentials(wCredentials)
+func (p *profile) writeCredential(fpath string, model *Model) error {
+	tCredential, err := p.tomlCredentials(model.Credentials)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -235,18 +233,26 @@ func (p *profile) tomlCredentials(credentials []*Credential) (*toml.Model, error
 	var t = new(toml.Model)
 	t.Tables = make([]*toml.Table, len(credentials))
 	for i, cre := range credentials {
-		t.Tables[i] = &toml.Table{
-			Name: cre.Name,
-			Configs: []*toml.Config{
-				{
-					Key:   "aws_access_key_id",
-					Value: cre.AccessKey,
-				},
-				{
-					Key:   "aws_secret_access_key",
-					Value: cre.SecretKey,
-				},
+		var configs = []*toml.Config{
+			{
+				Key:   "aws_access_key_id",
+				Value: cre.AccessKey,
 			},
+			{
+				Key:   "aws_secret_access_key",
+				Value: cre.SecretKey,
+			},
+		}
+		if cre.SessionToken != "" {
+			configs = append(configs, &toml.Config{
+				Key:   "aws_session_token",
+				Value: cre.SessionToken,
+			})
+		}
+
+		t.Tables[i] = &toml.Table{
+			Name:    cre.Name,
+			Configs: configs,
 		}
 	}
 	return t, nil
