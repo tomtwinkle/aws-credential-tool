@@ -22,22 +22,17 @@ func NewModeSTS(accessKey string, secretKey string, region string) STSInput {
 }
 
 func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
-	serialNumber, err := s.inputSerialNumber()
+	account, err := s.sts.Account()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	user, err := s.inputUser()
+	token, err := s.inputToken(account.Account, account.UserName)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	token, err := s.inputToken()
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-
-	sToken, err := s.sts.SessionToken(900, serialNumber, user, token)
+	sToken, err := s.sts.SessionToken(900, account.Account, account.UserName, token)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -47,55 +42,7 @@ func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
 	return sToken, nil
 }
 
-func (s *stsInput) inputSerialNumber() (string, error) {
-	validate := func(input string) error {
-		_, err := strconv.ParseFloat(input, 64)
-		if err != nil {
-			return errors.New("Invalid number")
-		}
-		if len(input) != 12 {
-			return errors.New("Invalid AWS Account SerialNumber.")
-		}
-		return nil
-	}
-
-	prompt := promptui.Prompt{
-		Label:    "AWS Account SerialNumber",
-		Validate: validate,
-	}
-
-	result, err := prompt.Run()
-
-	if err != nil {
-		fmt.Printf("%v\n", err.Error())
-		return "", err
-	}
-	return result, nil
-}
-
-func (s *stsInput) inputUser() (string, error) {
-	validate := func(input string) error {
-		if len(input) == 0 {
-			return errors.New("Account user name is not entered.")
-		}
-		return nil
-	}
-
-	prompt := promptui.Prompt{
-		Label:    "AWS Account UserName",
-		Validate: validate,
-	}
-
-	result, err := prompt.Run()
-
-	if err != nil {
-		fmt.Printf("%v\n", err.Error())
-		return "", err
-	}
-	return result, nil
-}
-
-func (s *stsInput) inputToken() (string, error) {
+func (s *stsInput) inputToken(account string, userName string) (string, error) {
 	validate := func(input string) error {
 		_, err := strconv.ParseFloat(input, 64)
 		if err != nil {
@@ -108,7 +55,7 @@ func (s *stsInput) inputToken() (string, error) {
 	}
 
 	prompt := promptui.Prompt{
-		Label:    "MFA Token",
+		Label:    fmt.Sprintf("Input MFA Token. Account[%s] User[%s]", account, userName) ,
 		Validate: validate,
 	}
 
