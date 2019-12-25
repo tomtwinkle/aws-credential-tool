@@ -22,22 +22,19 @@ func NewModeSTS(accessKey string, secretKey string, region string) STSInput {
 }
 
 func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
-	serialNumber, err := s.inputSerialNumber()
+	account, err := s.sts.Account()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	user, err := s.inputUser()
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
+	fmt.Printf("Get Session Token Account:[%s] User:[%s]", account.Account, account.UserName)
 
 	token, err := s.inputToken()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	sToken, err := s.sts.SessionToken(900, serialNumber, user, token)
+	sToken, err := s.sts.SessionToken(900, account.Account, account.UserName, token)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
