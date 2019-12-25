@@ -83,7 +83,7 @@ func (s *service) Account() (*Account, error) {
 		account = *output.Account
 		userId = *output.UserId
 		arn = *output.Arn
-		userName = strings.SplitAfter(arn, "/")[0]
+		userName = strings.Split(arn, "/")[1]
 	}
 
 	return &Account{

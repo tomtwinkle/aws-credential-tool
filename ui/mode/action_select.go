@@ -11,6 +11,7 @@ import (
 type mode struct {
 	Name       string
 	SelectMode model.SelectMode
+	Detail     string
 }
 
 type ActionSelect interface {
@@ -28,12 +29,25 @@ func (a *actionSelect) Select() (model.SelectMode, error) {
 	modes := []mode{
 		{
 			Name:       "Set choose profile.",
+			Detail:     "Set selected profile as default credentials",
 			SelectMode: model.SelectModeEnd,
 		},
 		{
-			Name:       "Set choose profile STS SessionToken.",
+			Name:       "Set choose sessionToken.",
+			Detail:     "Obtain sessionToken credentials using AWS STS and set as default credentials",
 			SelectMode: model.SelectModeSTS,
 		},
+	}
+
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}?",
+		Active:   "-> {{ .Name | cyan }}",
+		Inactive: "  {{ .Name | cyan }}",
+		Selected: "-> {{ .Name | green | cyan }}",
+		Details: `
+--------- Action Detail ----------
+{{ .Detail }}
+`,
 	}
 
 	prompt := promptui.Select{
@@ -41,8 +55,9 @@ func (a *actionSelect) Select() (model.SelectMode, error) {
 			Next: promptui.Key{Code: readline.CharNext, Display: "↓"},
 			Prev: promptui.Key{Code: readline.CharPrev, Display: "↑"},
 		},
-		Label: "Select Action",
-		Items: modes,
+		Label:     "Select Action",
+		Items:     modes,
+		Templates: templates,
 	}
 
 	idx, _, err := prompt.Run()
