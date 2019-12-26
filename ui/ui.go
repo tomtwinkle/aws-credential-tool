@@ -68,57 +68,17 @@ func (u *ui) render() (bool, error) {
 
 	switch u.nextMode {
 	case model.SelectModeProfileSelect:
-		u.mode = model.SelectModeProfileSelect
-		profileStr, err := u.profileSelect.Select()
-		if err != nil {
+		if err := u.modeProfileSelect(); err != nil {
 			return false, errors.WithStack(err)
 		}
-		if profileStr == "" {
-			return false, errors.New("not select profile.")
-		}
-		cre, err := u.profile.Credential(u.mProfile, profileStr)
-		if err != nil {
-			return false, errors.WithStack(err)
-		}
-		conf, err := u.profile.Config(u.mProfile, profileStr)
-		if err != nil {
-			return false, errors.WithStack(err)
-		}
-		u.mProfile.Credentials[0] = &profile.Credential{
-			Name:         "default",
-			AccessKey:    cre.AccessKey,
-			SecretKey:    cre.SecretKey,
-		}
-		u.mProfile.Configs[0] = &profile.Config{
-			Name:         "default",
-			Region:    conf.Region,
-			Output:    conf.Output,
-		}
-		u.selectProfile = profileStr
-		u.selectCredential = cre
-		u.selectConfig = conf
-		u.nextMode = model.SelectModeActionSelect
 	case model.SelectModeActionSelect:
-		u.mode = model.SelectModeActionSelect
-		nextMode, err := u.actionSelect.Select()
-		if err != nil {
+		if err := u.modeActionSelect(); err != nil {
 			return false, errors.WithStack(err)
 		}
-		u.nextMode = nextMode
 	case model.SelectModeSTS:
-		u.mode = model.SelectModeSTS
-		sts := mode.NewModeSTS(u.selectCredential.AccessKey, u.selectCredential.SecretKey, u.selectConfig.Region)
-		sToken, err := sts.GetSessionToken()
-		if err != nil {
+		if err := u.modeSTS(); err != nil {
 			return false, errors.WithStack(err)
 		}
-		u.mProfile.Credentials[0] = &profile.Credential{
-			Name:         "default",
-			AccessKey:    sToken.AccessKey,
-			SecretKey:    sToken.SecretKey,
-			SessionToken: sToken.SessionToken,
-		}
-		u.nextMode = model.SelectModeEnd
 	case model.SelectModeEnd:
 		u.mode = model.SelectModeEnd
 		if err := u.profile.SetDefault(u.mProfile); err != nil {
@@ -129,4 +89,72 @@ func (u *ui) render() (bool, error) {
 		return false, errors.New("Undefined mode.")
 	}
 	return false, nil
+}
+
+func (u *ui) modeProfileSelect() error {
+	u.mode = model.SelectModeProfileSelect
+	profileStr, err := u.profileSelect.Select()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if profileStr == "" {
+		return errors.New("not select profile.")
+	}
+	cre, err := u.profile.Credential(u.mProfile, profileStr)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	conf, err := u.profile.Config(u.mProfile, profileStr)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	// set default profile
+	u.mProfile.Credentials[0] = &profile.Credential{
+		Name:      "default",
+		AccessKey: cre.AccessKey,
+		SecretKey: cre.SecretKey,
+	}
+	u.mProfile.Configs[0] = &profile.Config{
+		Name:   "default",
+		Region: conf.Region,
+		Output: conf.Output,
+	}
+	u.selectProfile = profileStr
+	u.selectCredential = cre
+	u.selectConfig = conf
+
+	u.nextMode = model.SelectModeActionSelect
+	return nil
+}
+
+func (u *ui) modeActionSelect() error {
+	u.mode = model.SelectModeActionSelect
+	nextMode, err := u.actionSelect.Select()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	u.nextMode = nextMode
+	return nil
+}
+
+func (u *ui) modeSTS() error {
+	u.mode = model.SelectModeSTS
+	sts := mode.NewModeSTS(u.selectCredential.AccessKey, u.selectCredential.SecretKey, u.selectConfig.Region)
+	sToken, err := sts.GetSessionToken()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	cre := &profile.Credential{
+		Name:              "default",
+		AccessKey:         sToken.AccessKey,
+		SecretKey:         sToken.SecretKey,
+		SessionToken:      sToken.SessionToken,
+		OriginalAccessKey: u.selectCredential.AccessKey,
+		OriginalSecretKey: u.selectCredential.SecretKey,
+	}
+	u.mProfile.Credentials[0] = cre
+	u.selectCredential = cre
+	u.nextMode = model.SelectModeEnd
+	return nil
 }
