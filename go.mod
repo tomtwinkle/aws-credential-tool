@@ -1,4 +1,4 @@
-module aws-credential-tool
+module github.com/tomtwinkle/aws-credential-tool
 
 go 1.13
 
