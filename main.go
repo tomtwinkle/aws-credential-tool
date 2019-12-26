@@ -2,17 +2,30 @@ package main
 
 import (
 	"aws-credential-tool/ui"
+	"flag"
 	"fmt"
 )
 
+var version = "unknown"
+var revision = "unknown"
+
 func main() {
-	u, err := ui.NewUI()
-	if err != nil {
-		fmt.Printf("%+v", err)
-		panic(err)
-	}
-	if err := u.Run(); err != nil {
-		fmt.Printf("%+v", err)
-		panic(err)
+	var showVersion = false
+	flag.BoolVar(&showVersion, "v", false, "show application version")
+	flag.BoolVar(&showVersion, "version", false, "show application version")
+	flag.Parse()
+
+	if showVersion {
+		fmt.Println(fmt.Sprintf("aws-credential-tool version %s.rev-%s", version, revision))
+	} else {
+		u, err := ui.NewUI()
+		if err != nil {
+			fmt.Printf("%+v", err)
+			panic(err)
+		}
+		if err := u.Run(); err != nil {
+			fmt.Printf("%+v", err)
+			panic(err)
+		}
 	}
 }
