@@ -98,15 +98,17 @@ func (p *profile) Credential(model *Model, profile string) (*Credential, error) 
 }
 
 func (p *profile) Config(model *Model, profile string) (*Config, error) {
-	if profile == Default {
-		return model.Configs[0], nil
-	}
+	var config *Config
 	for _, c := range model.Configs {
 		if c.Name == fmt.Sprintf("profile %s", profile) {
-			return c, nil
+			config = c
 		}
 	}
-	return nil, errors.New(fmt.Sprintf("profile not found. [%s]", profile))
+	if config == nil {
+		// Use the default Profile if the corresponding Profile is not defined
+		config = model.Configs[0]
+	}
+	return config, nil
 }
 
 func (p *profile) SetDefault(model *Model) error {
