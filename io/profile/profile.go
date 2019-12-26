@@ -15,6 +15,17 @@ type Profile interface {
 	Config(model *Model, profile string) (*Config, error)
 }
 
+const (
+	Default                    = "default"
+	AWSAccessKeyId             = "aws_access_key_id"
+	AWSSecretAccessKey         = "aws_secret_access_key"
+	AWSSessionToken            = "aws_session_token"
+	OriginalAWSAccessKeyId     = "original_aws_access_key_id"
+	OriginalAWSSecretAccessKey = "original_aws_secret_access_key"
+	Region                     = "region"
+	Output                     = "output"
+)
+
 type profile struct {
 	toml toml.Toml
 }
@@ -31,10 +42,12 @@ type Config struct {
 }
 
 type Credential struct {
-	Name         string
-	AccessKey    string
-	SecretKey    string
-	SessionToken string
+	Name              string
+	AccessKey         string
+	SecretKey         string
+	SessionToken      string
+	OriginalAccessKey string
+	OriginalSecretKey string
 }
 
 func NewProfile() Profile {
@@ -73,7 +86,7 @@ func (p *profile) Load() (*Model, error) {
 }
 
 func (p *profile) Credential(model *Model, profile string) (*Credential, error) {
-	if profile == "default" {
+	if profile == Default {
 		return model.Credentials[0], nil
 	}
 	for _, c := range model.Credentials {
@@ -85,7 +98,7 @@ func (p *profile) Credential(model *Model, profile string) (*Credential, error) 
 }
 
 func (p *profile) Config(model *Model, profile string) (*Config, error) {
-	if profile == "default" {
+	if profile == Default {
 		return model.Configs[0], nil
 	}
 	for _, c := range model.Configs {
@@ -132,11 +145,11 @@ func (p *profile) mappingConfigs(t *toml.Model) ([]*Config, error) {
 	var configs = make([]*Config, len(t.Tables))
 	for idx, table := range t.Tables {
 		var region, output string
-		regionConfig, ok := table.Config("region")
+		regionConfig, ok := table.Config(Region)
 		if ok {
 			region = regionConfig
 		}
-		outputConfig, ok := table.Config("output")
+		outputConfig, ok := table.Config(Output)
 		if ok {
 			output = outputConfig
 		}
@@ -157,15 +170,22 @@ func (p *profile) mappingCredentials(t *toml.Model) ([]*Credential, error) {
 	var credentials = make([]*Credential, len(t.Tables))
 	for idx, table := range t.Tables {
 		var accessKey, secretKey string
-		accessKeyConfig, ok := table.Config("aws_access_key_id")
+		accessKeyConfig, ok := table.Config(AWSAccessKeyId)
 		if ok {
 			accessKey = accessKeyConfig
 		}
-		secretKeyConfig, ok := table.Config("aws_secret_access_key")
+		secretKeyConfig, ok := table.Config(AWSSecretAccessKey)
 		if ok {
 			secretKey = secretKeyConfig
 		}
-
+		originalAccessKeyConfig, ok := table.Config(OriginalAWSAccessKeyId)
+		if ok {
+			accessKey = originalAccessKeyConfig
+		}
+		originalSecretKeyConfig, ok := table.Config(OriginalAWSSecretAccessKey)
+		if ok {
+			secretKey = originalSecretKeyConfig
+		}
 		credentials[idx] = &Credential{
 			Name:      table.Name,
 			AccessKey: accessKey,
@@ -213,11 +233,11 @@ func (p *profile) tomlConfigs(configs []*Config) (*toml.Model, error) {
 			Name: config.Name,
 			Configs: []*toml.Config{
 				{
-					Key:   "region",
+					Key:   Region,
 					Value: config.Region,
 				},
 				{
-					Key:   "output",
+					Key:   Output,
 					Value: config.Output,
 				},
 			},
@@ -235,18 +255,30 @@ func (p *profile) tomlCredentials(credentials []*Credential) (*toml.Model, error
 	for i, cre := range credentials {
 		var configs = []*toml.Config{
 			{
-				Key:   "aws_access_key_id",
+				Key:   AWSAccessKeyId,
 				Value: cre.AccessKey,
 			},
 			{
-				Key:   "aws_secret_access_key",
+				Key:   AWSSecretAccessKey,
 				Value: cre.SecretKey,
 			},
 		}
 		if cre.SessionToken != "" {
 			configs = append(configs, &toml.Config{
-				Key:   "aws_session_token",
+				Key:   AWSSessionToken,
 				Value: cre.SessionToken,
+			})
+		}
+		if cre.OriginalAccessKey != "" {
+			configs = append(configs, &toml.Config{
+				Key:   OriginalAWSAccessKeyId,
+				Value: cre.OriginalAccessKey,
+			})
+		}
+		if cre.OriginalSecretKey != "" {
+			configs = append(configs, &toml.Config{
+				Key:   OriginalAWSSecretAccessKey,
+				Value: cre.OriginalSecretKey,
 			})
 		}
 
