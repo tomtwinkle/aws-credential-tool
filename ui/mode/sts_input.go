@@ -1,10 +1,10 @@
 package mode
 
 import (
-	"aws-credential-tool/io/sts"
 	"fmt"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
+	"github.com/tomtwinkle/aws-credential-tool/io/sts"
 	"strconv"
 )
 

@@ -1,11 +1,11 @@
 package mode
 
 import (
-	"aws-credential-tool/ui/model"
 	"fmt"
 	"github.com/chzyer/readline"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
+	"github.com/tomtwinkle/aws-credential-tool/ui/model"
 )
 
 type mode struct {

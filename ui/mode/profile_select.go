@@ -1,11 +1,11 @@
 package mode
 
 import (
-	"aws-credential-tool/io/profile"
 	"fmt"
 	"github.com/chzyer/readline"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
+	"github.com/tomtwinkle/aws-credential-tool/io/profile"
 )
 
 type ProfileSelect interface {

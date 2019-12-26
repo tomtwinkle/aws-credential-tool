@@ -1,9 +1,9 @@
 package main
 
 import (
-	"aws-credential-tool/ui"
 	"flag"
 	"fmt"
+	"github.com/tomtwinkle/aws-credential-tool/ui"
 )
 
 var version = "unknown"

@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"aws-credential-tool/io/profile"
-	"aws-credential-tool/ui/mode"
-	"aws-credential-tool/ui/model"
 	"github.com/pkg/errors"
+	"github.com/tomtwinkle/aws-credential-tool/io/profile"
+	"github.com/tomtwinkle/aws-credential-tool/ui/mode"
+	"github.com/tomtwinkle/aws-credential-tool/ui/model"
 )
 
 type UI interface {

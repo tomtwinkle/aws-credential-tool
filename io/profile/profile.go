@@ -1,10 +1,10 @@
 package profile
 
 import (
-	"aws-credential-tool/io/toml"
 	"fmt"
 	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
+	"github.com/tomtwinkle/aws-credential-tool/io/toml"
 	"path/filepath"
 )
 
