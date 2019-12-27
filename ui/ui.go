@@ -114,6 +114,8 @@ func (u *ui) modeProfileSelect() error {
 		Name:      "default",
 		AccessKey: cre.AccessKey,
 		SecretKey: cre.SecretKey,
+		OriginalAccessKey: u.mProfile.Credentials[0].AccessKey,
+		OriginalSecretKey: u.mProfile.Credentials[0].SecretKey,
 	}
 	u.mProfile.Configs[0] = &profile.Config{
 		Name:   "default",
