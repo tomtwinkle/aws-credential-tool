@@ -70,6 +70,8 @@ aws credetials switch tool for switching your default aws profile in `~/.aws/cre
     [default]
     aws_access_key_id = <AWS AccessKey Profile1>
     aws_secret_access_key = <AWS SecretAccessKey Profile1>
+    original_aws_access_key_id = <AWS AccessKey Default>
+    original_aws_secret_access_key = <AWS SecretAccessKey Default>
     [AWS Account Dev]
     aws_access_key_id = <AWS AccessKey Profile1>
     aws_secret_access_key = <AWS SecretAccessKey Profile1>
