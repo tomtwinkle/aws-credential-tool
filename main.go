@@ -20,12 +20,12 @@ func main() {
 	} else {
 		u, err := ui.NewUI()
 		if err != nil {
-			fmt.Printf("%+v", err)
-			panic(err)
+			fmt.Printf("%s", err.Error())
+			return
 		}
 		if err := u.Run(); err != nil {
-			fmt.Printf("%+v", err)
-			panic(err)
+			fmt.Printf("cancel %s", err.Error())
+			return
 		}
 	}
 }
