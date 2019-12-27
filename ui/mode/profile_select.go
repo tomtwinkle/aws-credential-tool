@@ -26,6 +26,13 @@ func (l *profileSelect) Select() (string, error) {
 		profiles[i] = p.Name
 	}
 
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}?",
+		Active:   "-> {{ . | cyan }}",
+		Inactive: "  {{ . | cyan }}",
+		Selected: "-> {{ . | green | cyan }}",
+	}
+
 	prompt := promptui.Select{
 		Keys: &promptui.SelectKeys{
 			Next: promptui.Key{Code: readline.CharNext, Display: "↓"},
@@ -33,6 +40,7 @@ func (l *profileSelect) Select() (string, error) {
 		},
 		Label:     "Select Profile",
 		Items:     profiles,
+		Templates: templates,
 	}
 
 	_, result, err := prompt.Run()
