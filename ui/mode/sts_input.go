@@ -32,7 +32,7 @@ func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	sToken, err := s.sts.SessionToken(900, account.Account, account.UserName, token)
+	sToken, err := s.sts.SessionToken(43200, account.Account, account.UserName, token)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -55,7 +55,7 @@ func (s *stsInput) inputToken(account string, userName string) (string, error) {
 	}
 
 	prompt := promptui.Prompt{
-		Label:    fmt.Sprintf("Input MFA Token. Account[%s] User[%s]", account, userName) ,
+		Label:    fmt.Sprintf("Input MFA Token. Account[%s] User[%s]", account, userName),
 		Validate: validate,
 	}
 
