@@ -3,8 +3,8 @@ module github.com/tomtwinkle/aws-credential-tool
 go 1.20
 
 require (
-	github.com/aws/aws-sdk-go v1.44.204
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
+	github.com/aws/aws-sdk-go v1.44.205
+	github.com/chzyer/readline v1.5.1
 	github.com/magefile/mage v1.14.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mitchellh/go-homedir v1.1.0
