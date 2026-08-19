@@ -1,42 +1,39 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/goreleaser/goreleaser/v2.17.1/www/docs/static/schema.json
+version: 2
+
+project_name: aws-credential-tool
+
 env:
-  - GO111MODULE=on
   - CGO_ENABLED=0
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
-  -
-    main: main.go
-
-    binary: awsmfa
-
+  - id: actool
+    main: .
+    binary: actool
     goos:
       - linux
       - windows
       - darwin
-
     goarch:
       - amd64
       - arm64
-
     ldflags:
       - -s -w
-      - -X main.Name={{.ProjectName}}
-      - -X main.Version={{.Version}}
+      - -X main.version={{.Version}}
+      - -X main.revision={{.FullCommit}}
+    flags:
+      - -trimpath
+    mod_timestamp: '{{ .CommitTimestamp }}'
 
 archives:
-  -
-    name_template: '{{.ProjectName}}_{{.Os}}_{{.Arch}}'
-    replacements:
-      386: i386
-      amd64: x86_64
-
+  - id: default
+    formats:
+      - tar.gz
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     format_overrides:
       - goos: windows
-        format: zip
-
+        formats:
+          - zip
     files:
       - README.md
       - LICENSE
@@ -46,3 +43,15 @@ checksum:
 
 release:
   draft: true
+  mode: keep-existing
+  prerelease: auto
+  replace_existing_artifacts: true
+  use_existing_draft: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'

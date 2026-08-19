@@ -5,6 +5,28 @@ AWS credentials out of `~/.aws/credentials`. Credentials are stored using the
 same `aws-vault` keyring namespace and JSON shapes, and AWS CLI reads them via
 `credential_process`.
 
+## Releases and binary downloads
+
+Merging a Conventional Commit into `master` starts the release workflow. The
+workflow determines the next SemVer version, creates a `vX.Y.Z` tag and draft
+release, builds the binaries, uploads the archives and `checksums.txt`, and
+publishes the release only after the build and checksum attestation succeed.
+
+The release archives contain the `actool` binary and are published for:
+
+- Linux: amd64 and arm64 (`tar.gz`)
+- macOS: amd64 and arm64 (`tar.gz`)
+- Windows: amd64 and arm64 (`zip`)
+
+Download the archive for your platform from the repository's [GitHub
+Releases](https://github.com/tomtwinkle/aws-credential-tool/releases), extract
+`actool`, and place it somewhere on your `PATH`.
+
+Version bumps follow Conventional Commits: `fix:` creates a patch release,
+`feat:` creates a minor release, and `!` or `BREAKING CHANGE:` creates a major
+release. If artifact publication fails, the workflow leaves the release as a
+draft; rerun the Release workflow with that tag in the optional `tag` input.
+
 ## What changes
 
 - The interactive commands and profile choices remain the same.
