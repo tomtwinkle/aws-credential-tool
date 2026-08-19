@@ -17,6 +17,9 @@ func configureIsolatedRuntime(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Linux derives os.UserConfigDir from XDG_CONFIG_HOME. Set it explicitly so
+	// each case gets an isolated actool state file in CI as well as locally.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("AWS_CONFIG_FILE", filepath.Join(home, ".aws", "config"))
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(home, ".aws", "credentials"))
 	t.Setenv("AWS_VAULT_BACKEND", "file")
