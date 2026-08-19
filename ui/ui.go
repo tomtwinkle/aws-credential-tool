@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/pkg/errors"
+	"errors"
 	"github.com/tomtwinkle/aws-credential-tool/io/profile"
 	"github.com/tomtwinkle/aws-credential-tool/ui/mode"
 	"github.com/tomtwinkle/aws-credential-tool/ui/model"
@@ -28,14 +28,17 @@ type ui struct {
 
 func NewUI() (UI, error) {
 	initMode := model.SelectModeProfileSelect
-	p := profile.NewProfile()
+	p, err := profile.NewInteractiveProfile(promptDeleteLegacyCredentials)
+	if err != nil {
+		return nil, err
+	}
 
 	mProfile, err := p.Load()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
-	if mProfile == nil {
-		return nil, errors.New("Profile not defined.")
+	if mProfile == nil || len(mProfile.Credentials) == 0 {
+		return nil, errors.New("Profile not defined.") //nolint:staticcheck // preserve the existing user-facing error text
 	}
 	profileSelect := mode.NewModeProfileSelect(mProfile)
 	actionSelect := mode.NewModeActionSelect()
@@ -53,7 +56,7 @@ func (u *ui) Run() error {
 	for {
 		exit, err := u.render()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		if exit {
 			return nil
@@ -69,24 +72,24 @@ func (u *ui) render() (bool, error) {
 	switch u.nextMode {
 	case model.SelectModeProfileSelect:
 		if err := u.modeProfileSelect(); err != nil {
-			return false, errors.WithStack(err)
+			return false, err
 		}
 	case model.SelectModeActionSelect:
 		if err := u.modeActionSelect(); err != nil {
-			return false, errors.WithStack(err)
+			return false, err
 		}
 	case model.SelectModeSTS:
 		if err := u.modeSTS(); err != nil {
-			return false, errors.WithStack(err)
+			return false, err
 		}
 	case model.SelectModeEnd:
 		u.mode = model.SelectModeEnd
-		if err := u.profile.SetDefault(u.mProfile); err != nil {
-			return false, errors.WithStack(err)
+		if err := u.profile.SetSelected(u.selectProfile); err != nil {
+			return false, err
 		}
 		return true, nil
 	default:
-		return false, errors.New("Undefined mode.")
+		return false, errors.New("Undefined mode.") //nolint:staticcheck // preserve the existing user-facing error text
 	}
 	return false, nil
 }
@@ -95,33 +98,20 @@ func (u *ui) modeProfileSelect() error {
 	u.mode = model.SelectModeProfileSelect
 	profileStr, err := u.profileSelect.Select()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if profileStr == "" {
-		return errors.New("not select profile.")
+		return errors.New("not select profile.") //nolint:staticcheck // preserve the existing error text
 	}
-	cre, err := u.profile.Credential(u.mProfile, profileStr)
+	cre, err := u.profile.Credential(profileStr)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	conf, err := u.profile.Config(u.mProfile, profileStr)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
-	// set default profile
-	u.mProfile.Credentials[0] = &profile.Credential{
-		Name:      "default",
-		AccessKey: cre.AccessKey,
-		SecretKey: cre.SecretKey,
-		OriginalAccessKey: u.mProfile.Credentials[0].AccessKey,
-		OriginalSecretKey: u.mProfile.Credentials[0].SecretKey,
-	}
-	u.mProfile.Configs[0] = &profile.Config{
-		Name:   "default",
-		Region: conf.Region,
-		Output: conf.Output,
-	}
 	u.selectProfile = profileStr
 	u.selectCredential = cre
 	u.selectConfig = conf
@@ -134,7 +124,7 @@ func (u *ui) modeActionSelect() error {
 	u.mode = model.SelectModeActionSelect
 	nextMode, err := u.actionSelect.Select()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	u.nextMode = nextMode
 	return nil
@@ -145,18 +135,19 @@ func (u *ui) modeSTS() error {
 	sts := mode.NewModeSTS(u.selectCredential.AccessKey, u.selectCredential.SecretKey, u.selectConfig.Region)
 	sToken, err := sts.GetSessionToken()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	cre := &profile.Credential{
-		Name:              "default",
-		AccessKey:         sToken.AccessKey,
-		SecretKey:         sToken.SecretKey,
-		SessionToken:      sToken.SessionToken,
-		OriginalAccessKey: u.selectCredential.AccessKey,
-		OriginalSecretKey: u.selectCredential.SecretKey,
+		Name:         u.selectProfile,
+		AccessKey:    sToken.AccessKey,
+		SecretKey:    sToken.SecretKey,
+		SessionToken: sToken.SessionToken,
+		Expiration:   &sToken.Expiration,
+		MFASerial:    sToken.MFASerial,
 	}
-	u.mProfile.Credentials[0] = cre
-	u.selectCredential = cre
+	if err := u.profile.StoreSessionToken(u.selectProfile, cre); err != nil {
+		return err
+	}
 	u.nextMode = model.SelectModeEnd
 	return nil
 }

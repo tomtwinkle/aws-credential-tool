@@ -2,26 +2,110 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v[0-9]+\.[0-9]+\.[0-9]+'
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild, for example v0.4.0
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3.5.2
+      - name: Checkout master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Select release tag
+        id: tag
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+          SVU_IMAGE: ghcr.io/caarlos0/svu@sha256:31a5145bfea0392fee47e0689ab391e941ee492f9d73cc06aa69a68008446ca8 # svu v3.4.1
+        run: |
+          set -euo pipefail
+          if [ -n "$MANUAL_TAG" ]; then
+            release_tag="$MANUAL_TAG"
+          else
+            latest_tag="$(git tag --sort=-version:refname | head -n 1)"
+            next_tag="$(docker run --network=none --rm \
+              -v "$GITHUB_WORKSPACE:/workspace:ro" \
+              -w /workspace "$SVU_IMAGE" next)"
+            if [ "$next_tag" = "$latest_tag" ]; then
+              echo "No releasable Conventional Commit was found."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            release_tag="$next_tag"
+          fi
+
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $release_tag" >&2
+            exit 1
+          fi
+
+          if [ -z "$MANUAL_TAG" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag --annotate "$release_tag" --message "Release $release_tag"
+            git push origin "$release_tag"
+          fi
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
+        if: steps.tag.outputs.release == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        if: steps.tag.outputs.release == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '>=1.20.0'
-      - run: go version
+          go-version-file: go.mod
+
+      - name: Show Go version
+        if: steps.tag.outputs.release == 'true'
+        run: go version
+
+      - name: Download dependencies
+        if: steps.tag.outputs.release == 'true'
+        run: go mod download
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v4
+        if: steps.tag.outputs.release == 'true'
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: latest
+          distribution: goreleaser
+          version: v2.17.1
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest release checksums
+        if: steps.tag.outputs.release == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ./dist/checksums.txt
+
+      - name: Publish release
+        if: steps.tag.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
