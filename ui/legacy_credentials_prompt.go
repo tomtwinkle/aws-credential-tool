@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/manifoldco/promptui"
-	"github.com/pkg/errors"
 )
 
 type legacyCredentialCleanupOption struct {
@@ -45,7 +44,7 @@ func promptDeleteLegacyCredentials(path string) (bool, error) {
 
 	idx, _, err := prompt.Run()
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, err
 	}
 
 	return options[idx].Delete, nil

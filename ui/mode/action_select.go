@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/chzyer/readline"
 	"github.com/manifoldco/promptui"
-	"github.com/pkg/errors"
 	"github.com/tomtwinkle/aws-credential-tool/ui/model"
 )
 
@@ -63,7 +62,7 @@ func (a *actionSelect) Select() (model.SelectMode, error) {
 	idx, _, err := prompt.Run()
 	if err != nil {
 		fmt.Printf("Prompt failed %v\n", err)
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 
 	return modes[idx].SelectMode, nil

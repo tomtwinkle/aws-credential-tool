@@ -11,7 +11,6 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/magefile/mage v1.17.2
 	github.com/manifoldco/promptui v0.9.0
-	github.com/pkg/errors v0.9.1
 	gopkg.in/ini.v1 v1.67.3
 	gotest.tools/v3 v3.5.2
 )

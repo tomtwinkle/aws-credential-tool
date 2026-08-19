@@ -1,3 +1,4 @@
+//go:build mage
 // +build mage
 
 package main
@@ -7,7 +8,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"github.com/magefile/mage/mg" // mg contains helpful utility functions, like Deps
-	"github.com/pkg/errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -43,7 +43,7 @@ func Build() error {
 	v, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
 	if err != nil {
 		fmt.Printf("%v\n", err)
-		return errors.WithStack(err)
+		return err
 	}
 	version := string(v)
 	version = strings.Trim(version, "\r\n")
@@ -51,7 +51,7 @@ func Build() error {
 	r, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		fmt.Printf("%v\n", err)
-		return errors.WithStack(err)
+		return err
 	}
 	revision := string(r)
 	revision = strings.Trim(revision, "\r\n")
@@ -68,18 +68,18 @@ func Build() error {
 		)
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("%v\n", err)
-			return errors.WithStack(err)
+			return err
 		}
 		compressFilePath := filepath.Join("builds", fmt.Sprintf(e.CompressFile, version, revision))
 		if e.Compress == "gz" {
 			if err := makeGzip(compressFilePath, filePath); err != nil {
 				fmt.Printf("%v\n", err)
-				return errors.WithStack(err)
+				return err
 			}
 		} else if e.Compress == "zip" {
 			if err := makeZip(compressFilePath, filePath); err != nil {
 				fmt.Printf("%v\n", err)
-				return errors.WithStack(err)
+				return err
 			}
 		}
 		os.Remove(filePath)
@@ -115,17 +115,17 @@ func makeGzip(compressFilePath string, filePath string) error {
 
 	gfile, err := os.Create(compressFilePath)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	defer gfile.Close()
 	zw, err := gzip.NewWriterLevel(gfile, gzip.BestCompression)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	defer zw.Close()
 
 	if _, err := zw.Write(orgfile); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return nil
 }
@@ -134,13 +134,13 @@ func makeZip(compressFilePath string, filePath string) error {
 	fmt.Printf("make compress %s\n", compressFilePath)
 	fileToZip, err := os.Open(filePath)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	defer fileToZip.Close()
 
 	info, err := fileToZip.Stat()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	newZipFile, err := os.Create(compressFilePath)
@@ -154,19 +154,19 @@ func makeZip(compressFilePath string, filePath string) error {
 
 	header, err := zip.FileInfoHeader(info)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	header.Name = filepath.Base(filePath)
 	header.Method = zip.Deflate
 
 	writer, err := zipWriter.CreateHeader(header)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	_, err = io.Copy(writer, fileToZip)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	return nil

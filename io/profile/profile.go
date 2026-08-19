@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	stdErrors "errors"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/99designs/keyring"
-	"github.com/pkg/errors"
 	"gopkg.in/ini.v1"
 )
 
@@ -48,8 +47,8 @@ const (
 )
 
 var (
-	errSecretNotFound = stdErrors.New("secret not found")
-	errStateNotFound  = stdErrors.New("state not found")
+	errSecretNotFound = errors.New("secret not found")
+	errStateNotFound  = errors.New("state not found")
 )
 
 type DeleteLegacyCredentialsPrompt func(path string) (bool, error)
@@ -196,13 +195,13 @@ func newConfiguredProfile(
 func newRuntimeProfile(deletePrompt DeleteLegacyCredentialsPrompt) (Profile, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	configPath, credentialsPath := awsProfilePaths(homeDir)
 	secrets, err := openAWSVaultStore()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	return newConfiguredProfile(
@@ -235,7 +234,7 @@ func openLegacyActoolStore() (secretStore, error) {
 func openKeyring(config keyring.Config) (secretStore, error) {
 	ring, err := keyring.Open(config)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return &keyringStore{keyring: ring}, nil
 }
@@ -329,22 +328,22 @@ func fileKeyringPassword(prompt string) (string, error) {
 func (p *profile) Load() (*Model, error) {
 	legacySelectedProfile, err := p.migrateLegacyActoolStore()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	pendingImport, err := p.prepareLegacyCredentialsImport()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	profileNames, credentials, err := p.loadBaseCredentials()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	state, err := p.loadState()
-	if err != nil && !stdErrors.Is(err, errStateNotFound) {
-		return nil, errors.WithStack(err)
+	if err != nil && !errors.Is(err, errStateNotFound) {
+		return nil, err
 	}
 
 	selectedProfile := state.SelectedProfile
@@ -371,27 +370,27 @@ func (p *profile) Load() (*Model, error) {
 		if pendingImport != nil {
 			if pendingImport.deleteSource {
 				if err := removeIfExists(pendingImport.path); err != nil {
-					return nil, errors.WithStack(err)
+					return nil, err
 				}
 			} else {
 				if err := backupLegacyCredentials(pendingImport.path); err != nil {
-					return nil, errors.WithStack(err)
+					return nil, err
 				}
 			}
 			state.LegacyCleanupPending = false
 		}
 
 		if err := p.syncConfig(selectedProfile, profileNames); err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		if err := p.saveState(state); err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 
 	configs, err := p.loadConfigs()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return &Model{
 		Configs:         configs,
@@ -403,7 +402,7 @@ func (p *profile) Load() (*Model, error) {
 func (p *profile) Credential(profileName string) (*Credential, error) {
 	credential, err := p.baseCredential(profileName)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return credential, nil
 }
@@ -428,34 +427,34 @@ func (p *profile) Config(model *Model, profileName string) (*Config, error) {
 	if defaultConfig != nil {
 		return defaultConfig, nil
 	}
-	return nil, errors.Errorf("profile config not found. [%s]", profileName)
+	return nil, fmt.Errorf("profile config not found. [%s]", profileName)
 }
 
 func (p *profile) SetSelected(profileName string) error {
 	if _, err := p.baseCredential(profileName); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	profileNames, err := p.profileNames()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if !containsProfile(profileNames, profileName) {
-		return errors.Errorf("profile not found. [%s]", profileName)
+		return fmt.Errorf("profile not found. [%s]", profileName)
 	}
 
 	state, err := p.loadState()
-	if err != nil && !stdErrors.Is(err, errStateNotFound) {
-		return errors.WithStack(err)
+	if err != nil && !errors.Is(err, errStateNotFound) {
+		return err
 	}
 	if err := p.syncConfig(profileName, profileNames); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	state.Version = stateVersion
 	state.SelectedProfile = profileName
 	if err := p.saveState(state); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return nil
 }
@@ -471,12 +470,12 @@ func (p *profile) StoreSessionToken(profileName string, credential *Credential) 
 		return errors.New("session credential is incomplete")
 	}
 	if _, err := p.baseCredential(profileName); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	credential.Name = profileName
 	if err := p.storeSessionCredential(credential); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return p.SetSelected(profileName)
 }
@@ -487,7 +486,7 @@ func (p *profile) StoreSessionToken(profileName string, credential *Credential) 
 func (p *profile) CredentialProcessPayload(profileName string) ([]byte, error) {
 	credential, _, err := p.resolveCredential(profileName)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	response := map[string]interface{}{
@@ -503,7 +502,7 @@ func (p *profile) CredentialProcessPayload(profileName string) ([]byte, error) {
 	}
 	payload, err := json.Marshal(response)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return append(payload, '\n'), nil
 }
@@ -521,26 +520,26 @@ func (p *profile) resolveCredential(profileName string) (*Credential, string, er
 		return nil, "", errors.New("no AWS profile is selected; run actool once before using AWS CLI")
 	}
 	if err := validateProfileName(selectedProfile); err != nil {
-		return nil, "", errors.WithStack(err)
+		return nil, "", err
 	}
 
 	session, expired, err := p.sessionCredentialForProfile(selectedProfile)
 	if err != nil {
-		return nil, "", errors.WithStack(err)
+		return nil, "", err
 	}
 	if session != nil {
 		return session, selectedProfile, nil
 	}
 	if expired {
-		return nil, "", errors.Errorf("session credentials for profile %q have expired; rerun actool", selectedProfile)
+		return nil, "", fmt.Errorf("session credentials for profile %q have expired; rerun actool", selectedProfile)
 	}
 
 	base, err := p.baseCredential(selectedProfile)
 	if err != nil {
-		return nil, "", errors.WithStack(err)
+		return nil, "", err
 	}
 	if base.Expiration != nil && !base.Expiration.After(time.Now().UTC()) {
-		return nil, "", errors.Errorf("credentials for profile %q have expired; rerun actool", selectedProfile)
+		return nil, "", fmt.Errorf("credentials for profile %q have expired; rerun actool", selectedProfile)
 	}
 	return base, selectedProfile, nil
 }
@@ -548,7 +547,7 @@ func (p *profile) resolveCredential(profileName string) (*Credential, string, er
 func (p *profile) sessionCredentialForProfile(profileName string) (*Credential, bool, error) {
 	keys, err := p.secrets.Keys()
 	if err != nil {
-		return nil, false, errors.WithStack(err)
+		return nil, false, err
 	}
 
 	var candidates []*Credential
@@ -562,14 +561,14 @@ func (p *profile) sessionCredentialForProfile(profileName string) (*Credential, 
 
 		data, err := p.secrets.Get(key)
 		if err != nil {
-			return nil, false, errors.WithStack(err)
+			return nil, false, err
 		}
 		credential, err := decodeCredential(data, profileName)
 		if err != nil {
-			return nil, false, errors.WithStack(err)
+			return nil, false, err
 		}
 		if strings.TrimSpace(credential.SessionToken) == "" {
-			return nil, false, errors.Errorf("session credential has no session token. [%s]", profileName)
+			return nil, false, fmt.Errorf("session credential has no session token. [%s]", profileName)
 		}
 		if credential.Expiration == nil || metadata.Expiration.Before(credential.Expiration.UTC()) {
 			expiration := metadata.Expiration.UTC()
@@ -600,12 +599,12 @@ func (p *profile) storeSessionCredential(credential *Credential) error {
 		return errors.New("session credential is incomplete")
 	}
 	if err := validateProfileName(credential.Name); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	keys, err := p.secrets.Keys()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	for _, key := range keys {
 		metadata, ok := parseSessionKey(key)
@@ -613,7 +612,7 @@ func (p *profile) storeSessionCredential(credential *Credential) error {
 			continue
 		}
 		if err := p.removeSecret(key); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 
@@ -631,24 +630,24 @@ func (p *profile) storeSessionCredential(credential *Credential) error {
 	}
 	encoded, err := json.Marshal(data)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return p.secrets.Set(sessionKey(metadata), encoded)
 }
 
 func (p *profile) baseCredential(profileName string) (*Credential, error) {
 	if err := validateProfileName(profileName); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if isNonProfileKey(profileName) {
-		return nil, errors.Errorf("profile not found. [%s]", profileName)
+		return nil, fmt.Errorf("profile not found. [%s]", profileName)
 	}
 	data, err := p.secrets.Get(profileName)
 	if err != nil {
-		if stdErrors.Is(err, errSecretNotFound) {
-			return nil, errors.Errorf("profile not found. [%s]", profileName)
+		if errors.Is(err, errSecretNotFound) {
+			return nil, fmt.Errorf("profile not found. [%s]", profileName)
 		}
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return decodeCredential(data, profileName)
 }
@@ -661,7 +660,7 @@ func (p *profile) profileNames() ([]string, error) {
 func (p *profile) loadBaseCredentials() ([]string, []*Credential, error) {
 	keys, err := p.secrets.Keys()
 	if err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 	sort.Strings(keys)
 
@@ -696,12 +695,12 @@ func (p *profile) prepareLegacyCredentialsImport() (*pendingLegacyImport, error)
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	plan, suggestedProfile, err := parseLegacyCredentials(legacyBytes)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if len(plan) == 0 {
 		return nil, nil
@@ -712,7 +711,7 @@ func (p *profile) prepareLegacyCredentialsImport() (*pendingLegacyImport, error)
 
 	if !planMatches {
 		if err := p.importCredentialPlan(plan); err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 	pending := &pendingLegacyImport{
@@ -723,7 +722,7 @@ func (p *profile) prepareLegacyCredentialsImport() (*pendingLegacyImport, error)
 	if p.deletePrompt != nil {
 		pending.deleteSource, err = p.deletePrompt(p.legacyCredentialsPath)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 	return pending, nil
@@ -759,7 +758,7 @@ func (p *profile) importCredentialPlanWithOptions(plan map[string]*Credential, o
 	for _, name := range names {
 		credential := plan[name]
 		if credential == nil {
-			return errors.Errorf("credential is nil. [%s]", name)
+			return fmt.Errorf("credential is nil. [%s]", name)
 		}
 		data := map[string]interface{}{
 			"AccessKeyID":     credential.AccessKey,
@@ -775,12 +774,12 @@ func (p *profile) importCredentialPlanWithOptions(plan map[string]*Credential, o
 		}
 		encoded, err := json.Marshal(data)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 
 		oldValue, oldErr := p.secrets.Get(name)
-		if oldErr != nil && !stdErrors.Is(oldErr, errSecretNotFound) {
-			return errors.WithStack(oldErr)
+		if oldErr != nil && !errors.Is(oldErr, errSecretNotFound) {
+			return oldErr
 		}
 		if oldErr == nil {
 			oldCredential, decodeErr := decodeCredential(oldValue, name)
@@ -788,7 +787,7 @@ func (p *profile) importCredentialPlanWithOptions(plan map[string]*Credential, o
 				continue
 			}
 			if !overwrite {
-				return errors.Errorf("legacy credential %q conflicts with an existing aws-vault credential; remove the conflict and run actool again", name)
+				return fmt.Errorf("legacy credential %q conflicts with an existing aws-vault credential; remove the conflict and run actool again", name)
 			}
 		}
 
@@ -799,9 +798,9 @@ func (p *profile) importCredentialPlanWithOptions(plan map[string]*Credential, o
 		})
 		if err := p.secrets.Set(name, encoded); err != nil {
 			if rollbackErr := p.rollbackSecretChanges(previous, changed); rollbackErr != nil {
-				return errors.WithMessage(err, "credential import failed and rollback also failed")
+				return fmt.Errorf("credential import failed and rollback also failed: %w", err)
 			}
-			return errors.WithStack(err)
+			return err
 		}
 		changed = append(changed, name)
 	}
@@ -839,10 +838,10 @@ func (p *profile) migrateLegacyActoolStore() (string, error) {
 	}
 	store, err := openLegacyStoreOnce(p)
 	if err != nil {
-		if stdErrors.Is(err, keyring.ErrNoAvailImpl) {
+		if errors.Is(err, keyring.ErrNoAvailImpl) {
 			return "", nil
 		}
-		return "", errors.WithStack(err)
+		return "", err
 	}
 	if store == nil {
 		return "", nil
@@ -850,10 +849,10 @@ func (p *profile) migrateLegacyActoolStore() (string, error) {
 
 	keys, err := store.Keys()
 	if err != nil {
-		if stdErrors.Is(err, errSecretNotFound) {
+		if errors.Is(err, errSecretNotFound) {
 			return "", nil
 		}
-		return "", errors.WithStack(err)
+		return "", err
 	}
 
 	plan := make(map[string]*Credential)
@@ -864,19 +863,19 @@ func (p *profile) migrateLegacyActoolStore() (string, error) {
 			value, getErr := store.Get(key)
 			if getErr == nil {
 				selectedProfile = strings.TrimSpace(string(value))
-			} else if !stdErrors.Is(getErr, errSecretNotFound) {
-				return "", errors.WithStack(getErr)
+			} else if !errors.Is(getErr, errSecretNotFound) {
+				return "", getErr
 			}
 			continue
 		}
 		if profileName, ok := decodeProfileName(baseCredentialKeyPrefix, key); ok {
 			value, getErr := store.Get(key)
 			if getErr != nil {
-				return "", errors.WithStack(getErr)
+				return "", getErr
 			}
 			credential, decodeErr := decodeCredential(value, profileName)
 			if decodeErr != nil {
-				return "", errors.WithStack(decodeErr)
+				return "", decodeErr
 			}
 			plan[profileName] = credential
 			continue
@@ -884,11 +883,11 @@ func (p *profile) migrateLegacyActoolStore() (string, error) {
 		if profileName, ok := decodeProfileName(sessionCredentialPrefix, key); ok {
 			value, getErr := store.Get(key)
 			if getErr != nil {
-				return "", errors.WithStack(getErr)
+				return "", getErr
 			}
 			credential, decodeErr := decodeCredential(value, profileName)
 			if decodeErr != nil {
-				return "", errors.WithStack(decodeErr)
+				return "", decodeErr
 			}
 			if credential.Expiration != nil && credential.Expiration.After(time.Now().UTC()) {
 				credential.Name = profileName
@@ -899,19 +898,19 @@ func (p *profile) migrateLegacyActoolStore() (string, error) {
 
 	if len(plan) > 0 {
 		if err := p.importLegacyCredentialPlan(plan); err != nil {
-			return "", errors.WithStack(err)
+			return "", err
 		}
 	}
 	for _, credential := range sessions {
 		current, _, sessionErr := p.sessionCredentialForProfile(credential.Name)
 		if sessionErr != nil {
-			return "", errors.WithStack(sessionErr)
+			return "", sessionErr
 		}
 		if current != nil {
 			continue
 		}
 		if err := p.storeSessionCredential(credential); err != nil {
-			return "", errors.WithStack(err)
+			return "", err
 		}
 	}
 	return selectedProfile, nil
@@ -927,7 +926,7 @@ func openLegacyStoreOnce(p *profile) (secretStore, error) {
 	}
 	store, err := p.legacyStoreFactory()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	p.legacyStoreFactory = nil
 	return store, nil
@@ -936,11 +935,11 @@ func openLegacyStoreOnce(p *profile) (secretStore, error) {
 func (p *profile) syncConfig(selectedProfile string, profileNames []string) error {
 	cfg, err := p.loadConfigFile()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	defaultSection, created, err := ensureSection(cfg, Default)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	changed := created
 
@@ -954,14 +953,14 @@ func (p *profile) syncConfig(selectedProfile string, profileNames []string) erro
 		if selectedProfile != Default {
 			if selectedSection, sectionErr := cfg.GetSection(profileSectionName(selectedProfile)); sectionErr == nil {
 				if hasCredentialSource(selectedSection) {
-					return errors.Errorf("selected profile %q contains an unsupported role or external credential source; actool did not rewrite AWS config", selectedProfile)
+					return fmt.Errorf("selected profile %q contains an unsupported role or external credential source; actool did not rewrite AWS config", selectedProfile)
 				}
 				if hasStaticCredentials(selectedSection) {
-					return errors.Errorf("selected profile %q contains static credentials in AWS config; actool did not rewrite AWS config", selectedProfile)
+					return fmt.Errorf("selected profile %q contains static credentials in AWS config; actool did not rewrite AWS config", selectedProfile)
 				}
 				existing := strings.TrimSpace(selectedSection.Key(CredentialProcess).String())
 				if existing != "" && !p.isActoolCredentialProcess(existing) {
-					return errors.Errorf("selected profile %q already has a different credential_process; actool did not rewrite AWS config", selectedProfile)
+					return fmt.Errorf("selected profile %q already has a different credential_process; actool did not rewrite AWS config", selectedProfile)
 				}
 			}
 		}
@@ -979,7 +978,7 @@ func (p *profile) syncConfig(selectedProfile string, profileNames []string) erro
 		}
 		section, sectionCreated, sectionErr := ensureSection(cfg, profileSectionName(profileName))
 		if sectionErr != nil {
-			return errors.WithStack(sectionErr)
+			return sectionErr
 		}
 		changed = sectionCreated || changed
 		if hasCredentialSource(section) {
@@ -1067,7 +1066,7 @@ func hasStaticCredentials(section *ini.Section) bool {
 func (p *profile) loadConfigs() ([]*Config, error) {
 	cfg, err := p.loadConfigFile()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	configs := make([]*Config, 0)
 	for _, section := range cfg.Sections() {
@@ -1098,7 +1097,7 @@ func (p *profile) loadConfigFile() (*ini.File, error) {
 		if os.IsNotExist(err) {
 			return ini.Empty(options), nil
 		}
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return cfg, nil
 }
@@ -1120,7 +1119,7 @@ func (p *profile) saveState(state profileState) error {
 
 func (p *profile) removeSecret(key string) error {
 	err := p.secrets.Remove(key)
-	if stdErrors.Is(err, errSecretNotFound) {
+	if errors.Is(err, errSecretNotFound) {
 		return nil
 	}
 	return err
@@ -1129,10 +1128,10 @@ func (p *profile) removeSecret(key string) error {
 func (k *keyringStore) Get(key string) ([]byte, error) {
 	item, err := k.keyring.Get(key)
 	if err != nil {
-		if stdErrors.Is(err, keyring.ErrKeyNotFound) {
+		if errors.Is(err, keyring.ErrKeyNotFound) {
 			return nil, errSecretNotFound
 		}
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return append([]byte(nil), item.Data...), nil
 }
@@ -1157,7 +1156,7 @@ func (k *keyringStore) Set(key string, value []byte) error {
 
 func (k *keyringStore) Remove(key string) error {
 	err := k.keyring.Remove(key)
-	if stdErrors.Is(err, keyring.ErrKeyNotFound) {
+	if errors.Is(err, keyring.ErrKeyNotFound) {
 		return errSecretNotFound
 	}
 	return err
@@ -1166,7 +1165,7 @@ func (k *keyringStore) Remove(key string) error {
 func (k *keyringStore) Keys() ([]string, error) {
 	keys, err := k.keyring.Keys()
 	if err != nil {
-		if stdErrors.Is(err, keyring.ErrKeyNotFound) {
+		if errors.Is(err, keyring.ErrKeyNotFound) {
 			return nil, errSecretNotFound
 		}
 		return nil, err
@@ -1180,14 +1179,14 @@ func (f *fileStateStore) Load() (profileState, error) {
 		if os.IsNotExist(err) {
 			return profileState{}, errStateNotFound
 		}
-		return profileState{}, errors.WithStack(err)
+		return profileState{}, err
 	}
 	var state profileState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return profileState{}, errors.WithStack(err)
+		return profileState{}, err
 	}
 	if state.Version != 0 && state.Version != stateVersion {
-		return profileState{}, errors.Errorf("unsupported actool state version: %d", state.Version)
+		return profileState{}, fmt.Errorf("unsupported actool state version: %d", state.Version)
 	}
 	return state, nil
 }
@@ -1195,7 +1194,7 @@ func (f *fileStateStore) Load() (profileState, error) {
 func (f *fileStateStore) Save(state profileState) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return writeFileAtomic(f.path, append(data, '\n'), 0o600)
 }
@@ -1216,27 +1215,27 @@ func (m *memoryStateStore) Save(state profileState) error {
 func decodeCredential(data []byte, profileName string) (*Credential, error) {
 	var values map[string]json.RawMessage
 	if err := json.Unmarshal(data, &values); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	accessKey := jsonString(values, "AccessKeyID", "AccessKeyId", "AccessKey", "access_key", "accessKey", AWSAccessKeyId)
 	secretKey := jsonString(values, "SecretAccessKey", "SecretKey", "secret_key", "secretKey", AWSSecretAccessKey)
 	sessionToken := jsonString(values, "SessionToken", "session_token", "sessionToken", AWSSessionToken)
 	if strings.TrimSpace(accessKey) == "" || strings.TrimSpace(secretKey) == "" {
-		return nil, errors.Errorf("credential is incomplete. [%s]", profileName)
+		return nil, fmt.Errorf("credential is incomplete. [%s]", profileName)
 	}
 
 	expiration, err := jsonTime(values, "Expiration", "expiration")
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if expiration == nil && jsonBool(values, "CanExpire") {
 		expiration, err = jsonTime(values, "Expires")
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		if expiration == nil {
-			return nil, errors.Errorf("expiring credential has no expiration. [%s]", profileName)
+			return nil, fmt.Errorf("expiring credential has no expiration. [%s]", profileName)
 		}
 	}
 	return &Credential{
@@ -1301,7 +1300,7 @@ func jsonTime(values map[string]json.RawMessage, names ...string) (*time.Time, e
 			}
 			return nil, parseErr
 		}
-		return nil, errors.Errorf("invalid time value for %s", name)
+		return nil, fmt.Errorf("invalid time value for %s", name)
 	}
 	return nil, nil
 }
@@ -1314,7 +1313,7 @@ func (p *profile) storeCredential(prefix, profileName string, credential *Creden
 	}
 	if prefix == baseCredentialKeyPrefix {
 		if err := validateProfileName(profileName); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		data := map[string]interface{}{
 			"AccessKeyID":     credential.AccessKey,
@@ -1330,7 +1329,7 @@ func (p *profile) storeCredential(prefix, profileName string, credential *Creden
 		}
 		encoded, err := json.Marshal(data)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		return p.secrets.Set(profileName, encoded)
 	}
@@ -1338,7 +1337,7 @@ func (p *profile) storeCredential(prefix, profileName string, credential *Creden
 		credential.Name = profileName
 		return p.storeSessionCredential(credential)
 	}
-	return errors.Errorf("unsupported credential prefix: %s", prefix)
+	return fmt.Errorf("unsupported credential prefix: %s", prefix)
 }
 
 func credentialsEqual(left, right *Credential) bool {
@@ -1359,7 +1358,7 @@ func credentialsEqual(left, right *Credential) bool {
 func parseLegacyCredentials(data []byte) (map[string]*Credential, string, error) {
 	cfg, err := ini.LoadSources(ini.LoadOptions{PreserveSurroundedQuote: true}, data)
 	if err != nil {
-		return nil, "", errors.WithStack(err)
+		return nil, "", err
 	}
 
 	plan := make(map[string]*Credential)
@@ -1370,11 +1369,11 @@ func parseLegacyCredentials(data []byte) (map[string]*Credential, string, error)
 			continue
 		}
 		if err := validateProfileName(name); err != nil {
-			return nil, "", errors.WithStack(err)
+			return nil, "", err
 		}
 		credential, ok, err := credentialFromSection(section, false)
 		if err != nil {
-			return nil, "", errors.WithStack(err)
+			return nil, "", err
 		}
 		if !ok {
 			continue
@@ -1388,11 +1387,11 @@ func parseLegacyCredentials(data []byte) (map[string]*Credential, string, error)
 	if section, sectionErr := cfg.GetSection(Default); sectionErr == nil {
 		actual, hasActual, err := credentialFromSection(section, false)
 		if err != nil {
-			return nil, "", errors.WithStack(err)
+			return nil, "", err
 		}
 		original, hasOriginal, err := credentialFromSection(section, true)
 		if err != nil {
-			return nil, "", errors.WithStack(err)
+			return nil, "", err
 		}
 
 		base := actual
@@ -1425,12 +1424,12 @@ func credentialFromSection(section *ini.Section, useOriginal bool) (*Credential,
 	secretKey := strings.TrimSpace(section.Key(secretKeyName).String())
 	if accessKey == "" && secretKey == "" {
 		if !useOriginal && strings.TrimSpace(section.Key(AWSSessionToken).String()) != "" {
-			return nil, false, errors.Errorf("profile %q contains a session token without access keys", section.Name())
+			return nil, false, fmt.Errorf("profile %q contains a session token without access keys", section.Name())
 		}
 		return nil, false, nil
 	}
 	if accessKey == "" || secretKey == "" {
-		return nil, false, errors.Errorf("profile %q contains an incomplete credential", section.Name())
+		return nil, false, fmt.Errorf("profile %q contains an incomplete credential", section.Name())
 	}
 
 	credential := &Credential{AccessKey: accessKey, SecretKey: secretKey}
@@ -1574,16 +1573,16 @@ func validateProfileName(profileName string) error {
 		return errors.New("profile name is empty")
 	}
 	if strings.ContainsAny(profileName, "\x00\r\n") {
-		return errors.Errorf("profile name contains a control character: %q", profileName)
+		return fmt.Errorf("profile name contains a control character: %q", profileName)
 	}
 	if strings.ContainsAny(profileName, "[]") {
-		return errors.Errorf("profile name contains an INI section delimiter: %q", profileName)
+		return fmt.Errorf("profile name contains an INI section delimiter: %q", profileName)
 	}
 	if profileName == selectedProfileKey || profileName == legacyCredentialsHashKey || profileName == "selected_profile" || profileName == "selectedProfile" || strings.HasPrefix(profileName, "credential/") || strings.HasPrefix(profileName, "oidc:") {
-		return errors.Errorf("profile name is reserved for secure-store metadata: %q", profileName)
+		return fmt.Errorf("profile name is reserved for secure-store metadata: %q", profileName)
 	}
 	if _, ok := parseSessionKey(profileName); ok {
-		return errors.Errorf("profile name is reserved for a session credential: %q", profileName)
+		return fmt.Errorf("profile name is reserved for a session credential: %q", profileName)
 	}
 	return nil
 }
@@ -1615,7 +1614,7 @@ func ensureSection(cfg *ini.File, name string) (*ini.Section, bool, error) {
 	}
 	section, err = cfg.NewSection(name)
 	if err != nil {
-		return nil, false, errors.WithStack(err)
+		return nil, false, err
 	}
 	return section, true, nil
 }
@@ -1889,7 +1888,7 @@ func (p *profile) credentialProcessCommand(profileName string) string {
 func saveConfigAtomic(path string, cfg *ini.File) error {
 	var buffer bytes.Buffer
 	if _, err := cfg.WriteTo(&buffer); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return writeFileAtomic(path, buffer.Bytes(), 0o600)
 }
@@ -1897,31 +1896,31 @@ func saveConfigAtomic(path string, cfg *ini.File) error {
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	temp, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	tempPath := temp.Name()
 	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(mode.Perm()); err != nil {
 		_ = temp.Close()
-		return errors.WithStack(err)
+		return err
 	}
 	if _, err := temp.Write(data); err != nil {
 		_ = temp.Close()
-		return errors.WithStack(err)
+		return err
 	}
 	if err := temp.Sync(); err != nil {
 		_ = temp.Close()
-		return errors.WithStack(err)
+		return err
 	}
 	if err := temp.Close(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err := os.Rename(tempPath, path); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return nil
 }
@@ -1936,7 +1935,7 @@ func removeIfExists(path string) error {
 
 func backupLegacyCredentials(path string) error {
 	if err := os.Chmod(path, 0o600); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	baseBackupPath := path + ".actool-backup"
 	for suffix := 0; suffix < 100; suffix++ {
@@ -1947,14 +1946,14 @@ func backupLegacyCredentials(path string) error {
 		if _, err := os.Lstat(backupPath); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
-			return errors.WithStack(err)
+			return err
 		}
 		if err := os.Rename(path, backupPath); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		return nil
 	}
-	return errors.Errorf("could not create a unique legacy credentials backup beside %s", path)
+	return fmt.Errorf("could not create a unique legacy credentials backup beside %s", path)
 }
 
 var _ Profile = (*profile)(nil)

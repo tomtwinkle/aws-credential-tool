@@ -1,14 +1,13 @@
 package toml
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 type Toml interface {
@@ -56,7 +55,7 @@ func NewToml() Toml {
 func (t *toml) DecodeFile(fpath string) (*Model, error) {
 	bs, err := os.ReadFile(fpath)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return t.Decode(string(bs))
 }
@@ -64,7 +63,7 @@ func (t *toml) DecodeFile(fpath string) (*Model, error) {
 func (t *toml) Decode(data string) (*Model, error) {
 	result, err := t.mapping(data)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return result, nil
 }
@@ -74,29 +73,29 @@ func (t *toml) WriteFile(fpath string, model *Model) error {
 	fName := filepath.Base(fpath)
 	fp, err := os.CreateTemp(tmpDir, fmt.Sprintf("%s.temp", fName))
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	tmpPath := fp.Name()
 	if model == nil {
-		return errors.New("model is nil.")
+		return errors.New("model is nil.") //nolint:staticcheck // preserve the existing error text
 	}
 	str := t.modelToToml(model)
 
 	if _, err := fp.WriteString(str); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err := fp.Close(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	if _, err := os.Stat(fpath); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err = os.Remove(fpath); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err := os.Rename(tmpPath, fpath); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return nil
 }

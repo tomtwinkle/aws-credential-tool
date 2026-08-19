@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/chzyer/readline"
 	"github.com/manifoldco/promptui"
-	"github.com/pkg/errors"
 	"github.com/tomtwinkle/aws-credential-tool/io/profile"
 )
 
@@ -46,7 +45,7 @@ func (l *profileSelect) Select() (string, error) {
 	_, result, err := prompt.Run()
 	if err != nil {
 		fmt.Printf("Prompt failed %v\n", err)
-		return "", errors.WithStack(err)
+		return "", err
 	}
 
 	fmt.Printf("choose profile [%q]\n", result)

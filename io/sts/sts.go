@@ -2,6 +2,8 @@ package sts
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/pkg/errors"
 )
 
 type SessionToken struct {
@@ -46,7 +47,7 @@ func NewService(accessKey string, secretKey string, region string) Service {
 func (s *service) SessionToken(durationSeconds int64, account string, userName string, token string) (*SessionToken, error) {
 	client, err := s.client()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	output, err := client.GetSessionToken(context.Background(), &awssts.GetSessionTokenInput{
@@ -55,7 +56,7 @@ func (s *service) SessionToken(durationSeconds int64, account string, userName s
 		TokenCode:       aws.String(token),
 	})
 	if err != nil {
-		return nil, errors.WithMessage(err, "sts fail")
+		return nil, fmt.Errorf("sts fail: %w", err)
 	}
 	if output.Credentials == nil {
 		return nil, errors.New("sts credentials are empty")
@@ -74,12 +75,12 @@ func (s *service) SessionToken(durationSeconds int64, account string, userName s
 func (s *service) Account() (*Account, error) {
 	client, err := s.client()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	output, err := client.GetCallerIdentity(context.Background(), &awssts.GetCallerIdentityInput{})
 	if err != nil {
-		return nil, errors.WithMessage(err, "sts fail")
+		return nil, fmt.Errorf("sts fail: %w", err)
 	}
 
 	account := aws.ToString(output.Account)
@@ -107,7 +108,7 @@ func (s *service) client() (*awssts.Client, error) {
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s.accessKey, s.secretKey, "")),
 	)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	return awssts.NewFromConfig(cfg), nil
