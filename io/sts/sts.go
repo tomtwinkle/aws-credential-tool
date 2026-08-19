@@ -1,14 +1,15 @@
 package sts
 
 import (
-	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sts"
-	"github.com/pkg/errors"
+	"context"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/pkg/errors"
 )
 
 type SessionToken struct {
@@ -16,12 +17,14 @@ type SessionToken struct {
 	SecretKey    string
 	SessionToken string
 	Expiration   time.Time
+	MFASerial    string
 }
 
 type Account struct {
 	Account  string
 	Arn      string
 	UserId   string
+	UserID   string
 	UserName string
 }
 
@@ -41,55 +44,71 @@ func NewService(accessKey string, secretKey string, region string) Service {
 }
 
 func (s *service) SessionToken(durationSeconds int64, account string, userName string, token string) (*SessionToken, error) {
-	sess := session.Must(session.NewSession())
-	creds := credentials.NewStaticCredentials(s.accessKey, s.secretKey, "")
-	svc := sts.New(
-		sess,
-		aws.NewConfig().WithRegion(s.region).WithCredentials(creds),
-	)
-	input := &sts.GetSessionTokenInput{
-		DurationSeconds: aws.Int64(durationSeconds),
-		SerialNumber:    aws.String(fmt.Sprintf("arn:aws:iam::%s:mfa/%s", account, userName)),
-		TokenCode:       aws.String(token),
+	client, err := s.client()
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
-	output, err := svc.GetSessionToken(input)
+
+	output, err := client.GetSessionToken(context.Background(), &awssts.GetSessionTokenInput{
+		DurationSeconds: aws.Int32(int32(durationSeconds)),
+		SerialNumber:    aws.String("arn:aws:iam::" + account + ":mfa/" + userName),
+		TokenCode:       aws.String(token),
+	})
 	if err != nil {
 		return nil, errors.WithMessage(err, "sts fail")
 	}
+	if output.Credentials == nil {
+		return nil, errors.New("sts credentials are empty")
+	}
 
+	mfaSerial := "arn:aws:iam::" + account + ":mfa/" + userName
 	return &SessionToken{
-		AccessKey:    *output.Credentials.AccessKeyId,
-		SecretKey:    *output.Credentials.SecretAccessKey,
-		SessionToken: *output.Credentials.SessionToken,
-		Expiration:   *output.Credentials.Expiration,
+		AccessKey:    aws.ToString(output.Credentials.AccessKeyId),
+		SecretKey:    aws.ToString(output.Credentials.SecretAccessKey),
+		SessionToken: aws.ToString(output.Credentials.SessionToken),
+		Expiration:   aws.ToTime(output.Credentials.Expiration),
+		MFASerial:    mfaSerial,
 	}, nil
 }
 
 func (s *service) Account() (*Account, error) {
-	sess := session.Must(session.NewSession())
-	creds := credentials.NewStaticCredentials(s.accessKey, s.secretKey, "")
-	svc := sts.New(
-		sess,
-		aws.NewConfig().WithRegion(s.region).WithCredentials(creds),
-	)
-	input := &sts.GetCallerIdentityInput{}
-	output, err := svc.GetCallerIdentity(input)
+	client, err := s.client()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	output, err := client.GetCallerIdentity(context.Background(), &awssts.GetCallerIdentityInput{})
 	if err != nil {
 		return nil, errors.WithMessage(err, "sts fail")
 	}
 
-	var account, userId, userName, arn string
-	if output.Account != nil && output.Arn != nil && output.UserId != nil {
-		account = *output.Account
-		userId = *output.UserId
-		arn = *output.Arn
-		userName = strings.Split(arn, "/")[1]
+	account := aws.ToString(output.Account)
+	arn := aws.ToString(output.Arn)
+	userID := aws.ToString(output.UserId)
+	userName := ""
+	if arn != "" {
+		parts := strings.Split(arn, "/")
+		userName = parts[len(parts)-1]
 	}
 
 	return &Account{
 		Account:  account,
 		Arn:      arn,
-		UserId:   userId,
+		UserId:   userID,
+		UserID:   userID,
 		UserName: userName,
 	}, nil
+}
+
+func (s *service) client() (*awssts.Client, error) {
+	cfg, err := config.LoadDefaultConfig(
+		context.Background(),
+		config.WithRegion(s.region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s.accessKey, s.secretKey, "")),
+	)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return awssts.NewFromConfig(cfg), nil
 }

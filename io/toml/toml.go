@@ -2,13 +2,13 @@ package toml
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type Toml interface {
@@ -54,7 +54,7 @@ func NewToml() Toml {
 }
 
 func (t *toml) DecodeFile(fpath string) (*Model, error) {
-	bs, err := ioutil.ReadFile(fpath)
+	bs, err := os.ReadFile(fpath)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -72,7 +72,7 @@ func (t *toml) Decode(data string) (*Model, error) {
 func (t *toml) WriteFile(fpath string, model *Model) error {
 	tmpDir := filepath.Dir(fpath)
 	fName := filepath.Base(fpath)
-	fp, err := ioutil.TempFile(tmpDir, fmt.Sprintf("%s.temp", fName))
+	fp, err := os.CreateTemp(tmpDir, fmt.Sprintf("%s.temp", fName))
 	if err != nil {
 		return errors.WithStack(err)
 	}
