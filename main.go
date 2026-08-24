@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/tomtwinkle/aws-credential-tool/internal/errguide"
 	"github.com/tomtwinkle/aws-credential-tool/io/profile"
 	"github.com/tomtwinkle/aws-credential-tool/ui"
 )
@@ -33,7 +34,10 @@ func run(args []string) error {
 	flags.BoolVar(&showVersion, "version", false, "show application version")
 
 	if err := flags.Parse(args); err != nil {
-		return err
+		return errguide.Wrap(err,
+			"Run `actool` for interactive mode or `actool --version` to verify the installation.",
+			"Use `actool credential-process --profile <profile>` only when invoking the AWS CLI credential process.",
+		)
 	}
 
 	if showVersion {
@@ -41,7 +45,10 @@ func run(args []string) error {
 		return nil
 	}
 	if flags.NArg() > 0 {
-		return fmt.Errorf("unknown command: %s", flags.Arg(0))
+		return errguide.New(fmt.Sprintf("unknown command: %s", flags.Arg(0)),
+			"Run `actool` for interactive mode.",
+			"Use `actool credential-process --profile <profile>` for the AWS CLI credential process.",
+		)
 	}
 
 	u, err := ui.NewUI()
@@ -60,10 +67,16 @@ func runCredentialProcess(args []string) error {
 	flags.StringVar(&profileName, "profile", "", "AWS profile name")
 
 	if err := flags.Parse(args); err != nil {
-		return err
+		return errguide.Wrap(err,
+			"Use `actool credential-process --profile <profile>` with an optional profile name.",
+			"Omit --profile only after actool has initialized a selected profile.",
+		)
 	}
 	if flags.NArg() > 0 {
-		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+		return errguide.New(fmt.Sprintf("unexpected arguments: %v", flags.Args()),
+			"Use `actool credential-process --profile <profile>` without extra arguments.",
+			"Omit --profile only after actool has initialized a selected profile.",
+		)
 	}
 
 	p, err := profile.NewProfile()

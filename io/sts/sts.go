@@ -2,8 +2,8 @@ package sts
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/tomtwinkle/aws-credential-tool/internal/errguide"
 )
 
 type SessionToken struct {
@@ -56,10 +57,13 @@ func (s *service) SessionToken(durationSeconds int64, account string, userName s
 		TokenCode:       aws.String(token),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("sts fail: %w", err)
+		return nil, errguide.Wrap(fmt.Errorf("sts fail: %w", err), stsRepairSteps()...)
 	}
 	if output.Credentials == nil {
-		return nil, errors.New("sts credentials are empty")
+		return nil, errguide.New("sts credentials are empty",
+			"Verify that the selected profile has valid long-lived credentials in aws-vault.",
+			"Verify the AWS account permits GetSessionToken and retry the session-token action.",
+		)
 	}
 
 	mfaSerial := "arn:aws:iam::" + account + ":mfa/" + userName
@@ -80,7 +84,7 @@ func (s *service) Account() (*Account, error) {
 
 	output, err := client.GetCallerIdentity(context.Background(), &awssts.GetCallerIdentityInput{})
 	if err != nil {
-		return nil, fmt.Errorf("sts fail: %w", err)
+		return nil, errguide.Wrap(fmt.Errorf("sts fail: %w", err), stsRepairSteps()...)
 	}
 
 	account := aws.ToString(output.Account)
@@ -102,14 +106,44 @@ func (s *service) Account() (*Account, error) {
 }
 
 func (s *service) client() (*awssts.Client, error) {
-	cfg, err := config.LoadDefaultConfig(
-		context.Background(),
-		config.WithRegion(s.region),
+	loadOptions := []func(*config.LoadOptions) error{
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s.accessKey, s.secretKey, "")),
-	)
+	}
+	if region := configuredRegion(s.region); region != "" {
+		loadOptions = append(loadOptions, config.WithRegion(region))
+	}
+
+	cfg, err := config.LoadDefaultConfig(context.Background(), loadOptions...)
 	if err != nil {
-		return nil, err
+		return nil, errguide.Wrap(err,
+			"Verify the AWS config and credential backend settings, then run actool again.",
+			"If using a custom endpoint or proxy, verify that it is reachable from this environment.",
+		)
+	}
+	if strings.TrimSpace(cfg.Region) == "" {
+		return nil, errguide.New("AWS region is not configured",
+			"Add `region = <region>` under `[default]` or `[profile <name>]` in `~/.aws/config`.",
+			"Or set `AWS_REGION=<region>` (or `AWS_DEFAULT_REGION=<region>`).",
+			"Run `actool` again and retry the session-token action.",
+		)
 	}
 
 	return awssts.NewFromConfig(cfg), nil
+}
+
+func configuredRegion(profileRegion string) string {
+	for _, name := range []string{"AWS_REGION", "AWS_DEFAULT_REGION"} {
+		if region := strings.TrimSpace(os.Getenv(name)); region != "" {
+			return region
+		}
+	}
+	return strings.TrimSpace(profileRegion)
+}
+
+func stsRepairSteps() []string {
+	return []string{
+		"Verify the AWS region and profile configuration described above.",
+		"If AWS_ENDPOINT_URL_STS is set, verify that the endpoint is reachable and intended.",
+		"Confirm the selected profile has valid credentials, then run actool again.",
+	}
 }

@@ -1,9 +1,9 @@
 package mode
 
 import (
-	"errors"
 	"fmt"
 	"github.com/manifoldco/promptui"
+	"github.com/tomtwinkle/aws-credential-tool/internal/errguide"
 	"github.com/tomtwinkle/aws-credential-tool/io/sts"
 	"strconv"
 )
@@ -43,20 +43,9 @@ func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
 }
 
 func (s *stsInput) inputToken(account string, userName string) (string, error) {
-	validate := func(input string) error {
-		_, err := strconv.ParseFloat(input, 64)
-		if err != nil {
-			return errors.New("Invalid number") //nolint:staticcheck // preserve the existing user-facing prompt text
-		}
-		if len(input) != 6 {
-			return errors.New("Invalid Token.") //nolint:staticcheck // preserve the existing user-facing prompt text
-		}
-		return nil
-	}
-
 	prompt := promptui.Prompt{
 		Label:    fmt.Sprintf("Input MFA Token. Account[%s] User[%s]", account, userName),
-		Validate: validate,
+		Validate: validateMFAToken,
 	}
 
 	result, err := prompt.Run()
@@ -66,4 +55,21 @@ func (s *stsInput) inputToken(account string, userName string) (string, error) {
 		return "", err
 	}
 	return result, nil
+}
+
+func validateMFAToken(input string) error {
+	_, err := strconv.ParseFloat(input, 64)
+	if err != nil {
+		return errguide.New("Invalid number",
+			"Enter the current six-digit numeric MFA token.",
+			"Retry before the token expires.",
+		) //nolint:staticcheck // preserve the existing user-facing prompt text
+	}
+	if len(input) != 6 {
+		return errguide.New("Invalid Token.",
+			"Enter the current six-digit numeric MFA token.",
+			"Retry before the token expires.",
+		) //nolint:staticcheck // preserve the existing user-facing prompt text
+	}
+	return nil
 }
