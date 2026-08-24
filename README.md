@@ -138,6 +138,8 @@ $ export AWS_VAULT_FILE_PASSPHRASE='use-a-secret-manager-or-prompt'
 
 Useful compatibility settings include:
 
+- `AWS_REGION` and `AWS_DEFAULT_REGION`: STS region overrides. A selected
+  profile without its own `region` inherits `[default]`'s region.
 - `AWS_VAULT_BACKEND`: `keychain`, `wincred`, `secret-service`, `kwallet`,
   `keyctl`, `file`, or `pass`, subject to the current platform.
 - `AWS_VAULT_FILE_DIR`: encrypted-file keyring directory; defaults to
@@ -160,6 +162,9 @@ Do not put long-lived secrets in shell history, CI logs, or
 - `different credential_process`: the profile already belongs to another
   credential provider. Remove or deliberately change that provider before
   selecting it in `actool`.
+- `AWS region is not configured`: add `region = <region>` to `[default]` or
+  the selected `[profile <name>]`, or set `AWS_REGION` or
+  `AWS_DEFAULT_REGION`.
 - expired session credentials: run `actool` and choose
   `Set choose sessionToken.` again.
 

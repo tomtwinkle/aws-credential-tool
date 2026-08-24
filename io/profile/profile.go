@@ -413,6 +413,7 @@ func (p *profile) Config(model *Model, profileName string) (*Config, error) {
 	}
 
 	var defaultConfig *Config
+	var selectedConfig *Config
 	for _, config := range model.Configs {
 		if config == nil {
 			continue
@@ -421,8 +422,19 @@ func (p *profile) Config(model *Model, profileName string) (*Config, error) {
 			defaultConfig = config
 		}
 		if config.Name == profileName {
-			return config, nil
+			selectedConfig = config
 		}
+	}
+	if selectedConfig != nil {
+		// AWS profiles commonly keep shared settings such as region in the
+		// default section. Preserve that compatibility when the selected
+		// profile does not define its own region.
+		if strings.TrimSpace(selectedConfig.Region) == "" && defaultConfig != nil && selectedConfig != defaultConfig {
+			resolved := *selectedConfig
+			resolved.Region = defaultConfig.Region
+			return &resolved, nil
+		}
+		return selectedConfig, nil
 	}
 	if defaultConfig != nil {
 		return defaultConfig, nil

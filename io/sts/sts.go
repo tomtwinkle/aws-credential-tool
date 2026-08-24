@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -102,14 +103,29 @@ func (s *service) Account() (*Account, error) {
 }
 
 func (s *service) client() (*awssts.Client, error) {
-	cfg, err := config.LoadDefaultConfig(
-		context.Background(),
-		config.WithRegion(s.region),
+	loadOptions := []func(*config.LoadOptions) error{
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s.accessKey, s.secretKey, "")),
-	)
+	}
+	if region := configuredRegion(s.region); region != "" {
+		loadOptions = append(loadOptions, config.WithRegion(region))
+	}
+
+	cfg, err := config.LoadDefaultConfig(context.Background(), loadOptions...)
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(cfg.Region) == "" {
+		return nil, errors.New("AWS region is not configured; set region in ~/.aws/config, AWS_REGION, or AWS_DEFAULT_REGION")
+	}
 
 	return awssts.NewFromConfig(cfg), nil
+}
+
+func configuredRegion(profileRegion string) string {
+	for _, name := range []string{"AWS_REGION", "AWS_DEFAULT_REGION"} {
+		if region := strings.TrimSpace(os.Getenv(name)); region != "" {
+			return region
+		}
+	}
+	return strings.TrimSpace(profileRegion)
 }
