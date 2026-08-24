@@ -909,6 +909,7 @@ func TestSyncConfigPreservesUnselectedCredentialSources(t *testing.T) {
 		{name: "credential source", key: "credential_source", value: "Environment"},
 		{name: "web identity", key: "web_identity_token_file", value: "/tmp/token"},
 		{name: "sso", key: "sso_start_url", value: "https://example.awsapps.com/start"},
+		{name: "empty sso session", key: "sso_session", value: ""},
 		{name: "external process", key: CredentialProcess, value: "aws-vault exec keep -j", wantProcess: "aws-vault exec keep -j"},
 		{name: "static credential", key: AWSAccessKeyId, value: "CONFIGACCESSKEY"},
 	}
@@ -930,6 +931,37 @@ func TestSyncConfigPreservesUnselectedCredentialSources(t *testing.T) {
 			section := config.Section("profile keep")
 			assert.Equal(t, section.Key(tc.key).String(), tc.value)
 			assert.Equal(t, section.Key(CredentialProcess).String(), tc.wantProcess)
+		})
+	}
+}
+
+func TestSyncConfigRejectsIncompleteSSOSource(t *testing.T) {
+	cases := []struct {
+		name        string
+		section     string
+		profileName string
+	}{
+		{name: "default profile", section: "default", profileName: Default},
+		{name: "selected profile", section: "profile keep", profileName: "keep"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config")
+			original := fmt.Sprintf("[%s]\nsso_session =\n", tc.section)
+			writeTestFile(t, configPath, original)
+			store := newFakeSecretStore()
+			p := newProfile(configPath, filepath.Join(dir, "credentials"), "actool", store, nil)
+			storeBaseCredential(t, p, tc.profileName, "ACCESSKEY", "SECRETKEY", nil)
+
+			_, err := p.Load()
+			assert.ErrorContains(t, err, "How to fix:")
+			assert.ErrorContains(t, err, "sso_session")
+			assert.ErrorContains(t, err, configPath)
+			configData, readErr := os.ReadFile(configPath)
+			assert.NilError(t, readErr)
+			assert.Equal(t, string(configData), original)
 		})
 	}
 }

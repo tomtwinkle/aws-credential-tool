@@ -1068,7 +1068,8 @@ func (p *profile) configConflictError(message string) error {
 		configPath = "~/.aws/config"
 	}
 	return errguide.New(message,
-		fmt.Sprintf("Inspect `%s` and remove or move the conflicting role, static credential, or credential_process setting if actool should manage it.", configPath),
+		fmt.Sprintf("Inspect `%s` and remove or move the conflicting role, SSO, static credential, or credential_process setting if actool should manage it.", configPath),
+		"For an SSO profile, make sure `sso_session` is non-empty and matches an existing `[sso-session <name>]` section.",
 		"If the profile belongs to another credential provider, choose a different profile instead.",
 		"Run actool again after resolving the configuration conflict.",
 	)
@@ -1121,7 +1122,11 @@ func hasCredentialSource(section *ini.Section) bool {
 		"sso_account_id",
 		"sso_role_name",
 	} {
-		if strings.TrimSpace(section.Key(keyName).String()) != "" {
+		// Presence matters even when the value is empty. AWS CLI treats an
+		// empty sso_session as a configured SSO source and reports that the
+		// sso-session "" does not exist. Do not add actool's credential_process
+		// to a profile that another provider has already started configuring.
+		if section.HasKey(keyName) {
 			return true
 		}
 	}

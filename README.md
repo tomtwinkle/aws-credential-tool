@@ -182,6 +182,11 @@ when the message instructs you to do so.
 - `different credential_process`: the profile already belongs to another
   credential provider. Remove or deliberately change that provider before
   selecting it in `actool`.
+- `The specified sso-session does not exist: ""`: inspect
+  `~/.aws/config` for an empty `sso_session =`. If the profile is an SSO
+  profile, set a non-empty session name and add the matching
+  `[sso-session <name>]` section. Otherwise remove the incomplete SSO setting
+  and select the vault-backed profile in `actool` again.
 - `AWS region is not configured`: add `region = <region>` to `[default]` or
   the selected `[profile <name>]`, or set `AWS_REGION` or
   `AWS_DEFAULT_REGION`.
