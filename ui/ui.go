@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+
+	"github.com/tomtwinkle/aws-credential-tool/internal/errguide"
 	"github.com/tomtwinkle/aws-credential-tool/io/profile"
 	"github.com/tomtwinkle/aws-credential-tool/ui/mode"
 	"github.com/tomtwinkle/aws-credential-tool/ui/model"
@@ -30,15 +32,25 @@ func NewUI() (UI, error) {
 	initMode := model.SelectModeProfileSelect
 	p, err := profile.NewInteractiveProfile(promptDeleteLegacyCredentials)
 	if err != nil {
-		return nil, err
+		return nil, errguide.Wrap(err,
+			"Unlock or configure an AWS-compatible keyring, then run actool again.",
+			"Alternatively configure the encrypted file backend with AWS_VAULT_BACKEND=file.",
+		)
 	}
 
 	mProfile, err := p.Load()
 	if err != nil {
-		return nil, err
+		return nil, errguide.Wrap(err,
+			"Verify AWS_CONFIG_FILE and AWS_SHARED_CREDENTIALS_FILE if custom paths are in use.",
+			"Fix the reported profile or configuration issue, then run actool again.",
+		)
 	}
 	if mProfile == nil || len(mProfile.Credentials) == 0 {
-		return nil, errors.New("Profile not defined.") //nolint:staticcheck // preserve the existing user-facing error text
+		return nil, errguide.New("Profile not defined.",
+			"Add a profile directly to the secure store with `aws-vault add <profile>`.",
+			"Or create `~/.aws/credentials` with `aws configure --profile <profile>` and run actool.",
+			"Run actool again after at least one profile is available.",
+		) //nolint:staticcheck // preserve the existing user-facing error text
 	}
 	profileSelect := mode.NewModeProfileSelect(mProfile)
 	actionSelect := mode.NewModeActionSelect()
@@ -101,7 +113,10 @@ func (u *ui) modeProfileSelect() error {
 		return err
 	}
 	if profileStr == "" {
-		return errors.New("not select profile.") //nolint:staticcheck // preserve the existing error text
+		return errguide.New("not select profile.",
+			"Use the arrow keys to select a profile and press Enter.",
+			"Run actool again if the profile list is empty.",
+		) //nolint:staticcheck // preserve the existing error text
 	}
 	cre, err := u.profile.Credential(profileStr)
 	if err != nil {
@@ -146,7 +161,10 @@ func (u *ui) modeSTS() error {
 		MFASerial:    sToken.MFASerial,
 	}
 	if err := u.profile.StoreSessionToken(u.selectProfile, cre); err != nil {
-		return err
+		return errguide.Wrap(err,
+			"Run actool again and retry the session-token action.",
+			"If the long-lived credentials are invalid, replace them with aws-vault add <profile> first.",
+		)
 	}
 	u.nextMode = model.SelectModeEnd
 	return nil

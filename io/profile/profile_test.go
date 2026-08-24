@@ -255,6 +255,7 @@ func TestCredentialProcessPayloadResolution(t *testing.T) {
 		setup       func(t *testing.T, p *profile, store *fakeSecretStore)
 		wantPayload map[string]interface{}
 		wantErr     string
+		wantGuide   string
 	}{
 		{
 			name:        "explicit base credential",
@@ -297,7 +298,8 @@ func TestCredentialProcessPayloadResolution(t *testing.T) {
 					Expiration:   &expired,
 				}))
 			},
-			wantErr: "have expired",
+			wantErr:   "have expired",
+			wantGuide: "Set choose sessionToken.",
 		},
 		{
 			name:        "expired base credential",
@@ -306,20 +308,23 @@ func TestCredentialProcessPayloadResolution(t *testing.T) {
 				expired := time.Now().UTC().Add(-time.Minute)
 				storeBaseCredential(t, p, "dev", "BASEACCESSKEY", "BASESECRETKEY", &expired)
 			},
-			wantErr: "have expired",
+			wantErr:   "have expired",
+			wantGuide: "Replace the long-lived credentials",
 		},
 		{
 			name: "selected profile is required for implicit lookup",
 			setup: func(t *testing.T, p *profile, _ *fakeSecretStore) {
 				storeBaseCredential(t, p, "dev", "BASEACCESSKEY", "BASESECRETKEY", nil)
 			},
-			wantErr: "not initialized",
+			wantErr:   "not initialized",
+			wantGuide: "Run `actool` once to synchronize",
 		},
 		{
 			name:        "missing profile",
 			profileName: "missing",
 			setup:       func(*testing.T, *profile, *fakeSecretStore) {},
 			wantErr:     "profile not found",
+			wantGuide:   "aws-vault add <profile>",
 		},
 		{
 			name:        "malformed session without token fails closed",
@@ -346,6 +351,9 @@ func TestCredentialProcessPayloadResolution(t *testing.T) {
 			payload, err := p.CredentialProcessPayload(tc.profileName)
 			if tc.wantErr != "" {
 				assert.ErrorContains(t, err, tc.wantErr)
+				if tc.wantGuide != "" {
+					assert.ErrorContains(t, err, tc.wantGuide)
+				}
 				return
 			}
 			assert.NilError(t, err)
@@ -585,6 +593,7 @@ func TestFileKeyringPasswordRejectsEmptyEnvironmentValue(t *testing.T) {
 	t.Setenv("AWS_VAULT_FILE_PASSPHRASE", "")
 	_, err := fileKeyringPassword("unused")
 	assert.ErrorContains(t, err, "must not be empty")
+	assert.ErrorContains(t, err, "Unset AWS_VAULT_FILE_PASSPHRASE")
 }
 
 func TestFileKeyringPasswordUsesEnvironmentValue(t *testing.T) {
@@ -690,6 +699,8 @@ func TestLegacyCredentialsAreRemovedBeforeConfigSyncFailure(t *testing.T) {
 
 	_, err := p.Load()
 	assert.ErrorContains(t, err, "different credential_process")
+	assert.ErrorContains(t, err, "How to fix:")
+	assert.ErrorContains(t, err, configPath)
 	_, sourceErr := os.Stat(credentialsPath)
 	assert.Assert(t, os.IsNotExist(sourceErr))
 	_, backupErr := os.Stat(credentialsPath + ".actool-backup")
@@ -954,6 +965,8 @@ func TestDoesNotRewriteStaticCredentialsInAWSConfig(t *testing.T) {
 
 	_, err := p.Load()
 	assert.ErrorContains(t, err, "static credentials in AWS config")
+	assert.ErrorContains(t, err, "How to fix:")
+	assert.ErrorContains(t, err, configPath)
 	configData, readErr := os.ReadFile(configPath)
 	assert.NilError(t, readErr)
 	assert.Equal(t, string(configData), original)

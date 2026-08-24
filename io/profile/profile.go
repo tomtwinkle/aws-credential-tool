@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/99designs/keyring"
+	"github.com/tomtwinkle/aws-credential-tool/internal/errguide"
 	"gopkg.in/ini.v1"
 )
 
@@ -201,7 +202,11 @@ func newRuntimeProfile(deletePrompt DeleteLegacyCredentialsPrompt) (Profile, err
 	configPath, credentialsPath := awsProfilePaths(homeDir)
 	secrets, err := openAWSVaultStore()
 	if err != nil {
-		return nil, err
+		return nil, errguide.Wrap(err,
+			"Unlock or configure an OS keyring supported by aws-vault, then run actool again.",
+			"Alternatively set AWS_VAULT_BACKEND=file and enter a non-empty passphrase.",
+			"Use the same backend, file directory, and keychain settings when running aws-vault and actool.",
+		)
 	}
 
 	return newConfiguredProfile(
@@ -311,16 +316,25 @@ func secureBackends() []keyring.BackendType {
 func fileKeyringPassword(prompt string) (string, error) {
 	if password, ok := os.LookupEnv("AWS_VAULT_FILE_PASSPHRASE"); ok {
 		if password == "" {
-			return "", errors.New("AWS_VAULT_FILE_PASSPHRASE must not be empty")
+			return "", errguide.New("AWS_VAULT_FILE_PASSPHRASE must not be empty",
+				"Unset AWS_VAULT_FILE_PASSPHRASE and run actool again to enter the passphrase interactively.",
+				"Or set it to a non-empty value in a protected environment.",
+			)
 		}
 		return password, nil
 	}
 	password, err := keyring.TerminalPrompt(prompt)
 	if err != nil {
-		return "", err
+		return "", errguide.Wrap(err,
+			"Run actool from an interactive terminal and enter the keyring passphrase.",
+			"For non-interactive use, configure a protected file-keyring passphrase before retrying.",
+		)
 	}
 	if password == "" {
-		return "", errors.New("file keyring passphrase must not be empty")
+		return "", errguide.New("file keyring passphrase must not be empty",
+			"Enter a non-empty passphrase when prompted and run actool again.",
+			"Or set AWS_VAULT_FILE_PASSPHRASE in a protected environment.",
+		)
 	}
 	return password, nil
 }
@@ -439,7 +453,11 @@ func (p *profile) Config(model *Model, profileName string) (*Config, error) {
 	if defaultConfig != nil {
 		return defaultConfig, nil
 	}
-	return nil, fmt.Errorf("profile config not found. [%s]", profileName)
+	return nil, errguide.New(fmt.Sprintf("profile config not found. [%s]", profileName),
+		"Add `[default]` or `[profile <name>]` to `~/.aws/config`.",
+		"Set a region before using the STS session-token action.",
+		"Run actool again after saving the AWS config.",
+	)
 }
 
 func (p *profile) SetSelected(profileName string) error {
@@ -524,12 +542,24 @@ func (p *profile) resolveCredential(profileName string) (*Credential, string, er
 	if selectedProfile == "" {
 		state, err := p.loadState()
 		if err != nil {
-			return nil, "", errors.New("actool is not initialized; run actool once before using AWS CLI")
+			if errors.Is(err, errStateNotFound) {
+				return nil, "", errguide.New("actool is not initialized; run actool once before using AWS CLI",
+					"Add a profile with `aws-vault add <profile>` or `aws configure --profile <profile>` first.",
+					"Run `actool` once to synchronize `~/.aws/config`, then retry the AWS CLI command.",
+				)
+			}
+			return nil, "", errguide.Wrap(err,
+				"Back up the actool state file and verify its permissions.",
+				"Run actool again after repairing or removing the invalid state file.",
+			)
 		}
 		selectedProfile = state.SelectedProfile
 	}
 	if selectedProfile == "" {
-		return nil, "", errors.New("no AWS profile is selected; run actool once before using AWS CLI")
+		return nil, "", errguide.New("no AWS profile is selected; run actool once before using AWS CLI",
+			"Run actool, select a profile, and choose `Set choose profile.`.",
+			"Retry the AWS CLI command after the selection is saved.",
+		)
 	}
 	if err := validateProfileName(selectedProfile); err != nil {
 		return nil, "", err
@@ -537,21 +567,33 @@ func (p *profile) resolveCredential(profileName string) (*Credential, string, er
 
 	session, expired, err := p.sessionCredentialForProfile(selectedProfile)
 	if err != nil {
-		return nil, "", err
+		return nil, "", errguide.Wrap(err,
+			"Run actool and choose `Set choose sessionToken.` to replace the invalid session credential.",
+			"Then retry the AWS CLI command.",
+		)
 	}
 	if session != nil {
 		return session, selectedProfile, nil
 	}
 	if expired {
-		return nil, "", fmt.Errorf("session credentials for profile %q have expired; rerun actool", selectedProfile)
+		return nil, "", errguide.New(fmt.Sprintf("session credentials for profile %q have expired; rerun actool", selectedProfile),
+			"Run actool and choose `Set choose sessionToken.` to obtain fresh session credentials.",
+			"If session credentials are not needed, choose `Set choose profile.` instead.",
+		)
 	}
 
 	base, err := p.baseCredential(selectedProfile)
 	if err != nil {
-		return nil, "", err
+		return nil, "", errguide.Wrap(err,
+			"Add the profile with `aws-vault add <profile>` or `aws configure --profile <profile>`.",
+			"Run actool to synchronize the profile, then retry the AWS CLI command.",
+		)
 	}
 	if base.Expiration != nil && !base.Expiration.After(time.Now().UTC()) {
-		return nil, "", fmt.Errorf("credentials for profile %q have expired; rerun actool", selectedProfile)
+		return nil, "", errguide.New(fmt.Sprintf("credentials for profile %q have expired; rerun actool", selectedProfile),
+			"Replace the long-lived credentials with `aws-vault add <profile>` or `aws configure --profile <profile>`.",
+			"Run actool again and retry the AWS CLI command.",
+		)
 	}
 	return base, selectedProfile, nil
 }
@@ -712,7 +754,11 @@ func (p *profile) prepareLegacyCredentialsImport() (*pendingLegacyImport, error)
 
 	plan, suggestedProfile, err := parseLegacyCredentials(legacyBytes)
 	if err != nil {
-		return nil, err
+		return nil, errguide.Wrap(err,
+			"Inspect the AWS_SHARED_CREDENTIALS_FILE for an incomplete or malformed profile.",
+			"Fix the file with `aws configure --profile <profile>`, or move it aside when using aws-vault directly.",
+			"Run actool again after the credentials file is valid or absent.",
+		)
 	}
 	if len(plan) == 0 {
 		return nil, nil
@@ -799,7 +845,11 @@ func (p *profile) importCredentialPlanWithOptions(plan map[string]*Credential, o
 				continue
 			}
 			if !overwrite {
-				return fmt.Errorf("legacy credential %q conflicts with an existing aws-vault credential; remove the conflict and run actool again", name)
+				return errguide.New(fmt.Sprintf("legacy credential %q conflicts with an existing aws-vault credential", name),
+					"Keep the existing aws-vault credential and remove or rename the conflicting legacy profile.",
+					"Or choose a different profile name for the legacy credential.",
+					"Run actool again after resolving the conflict.",
+				)
 			}
 		}
 
@@ -957,28 +1007,28 @@ func (p *profile) syncConfig(selectedProfile string, profileNames []string) erro
 
 	if selectedProfile != "" {
 		if hasCredentialSource(defaultSection) {
-			return errors.New("default profile contains an unsupported role or external credential source; actool did not rewrite AWS config")
+			return p.configConflictError("default profile contains an unsupported role or external credential source; actool did not rewrite AWS config")
 		}
 		if hasStaticCredentials(defaultSection) {
-			return errors.New("default profile contains static credentials in AWS config; actool did not rewrite AWS config")
+			return p.configConflictError("default profile contains static credentials in AWS config; actool did not rewrite AWS config")
 		}
 		if selectedProfile != Default {
 			if selectedSection, sectionErr := cfg.GetSection(profileSectionName(selectedProfile)); sectionErr == nil {
 				if hasCredentialSource(selectedSection) {
-					return fmt.Errorf("selected profile %q contains an unsupported role or external credential source; actool did not rewrite AWS config", selectedProfile)
+					return p.configConflictError(fmt.Sprintf("selected profile %q contains an unsupported role or external credential source; actool did not rewrite AWS config", selectedProfile))
 				}
 				if hasStaticCredentials(selectedSection) {
-					return fmt.Errorf("selected profile %q contains static credentials in AWS config; actool did not rewrite AWS config", selectedProfile)
+					return p.configConflictError(fmt.Sprintf("selected profile %q contains static credentials in AWS config; actool did not rewrite AWS config", selectedProfile))
 				}
 				existing := strings.TrimSpace(selectedSection.Key(CredentialProcess).String())
 				if existing != "" && !p.isActoolCredentialProcess(existing) {
-					return fmt.Errorf("selected profile %q already has a different credential_process; actool did not rewrite AWS config", selectedProfile)
+					return p.configConflictError(fmt.Sprintf("selected profile %q already has a different credential_process; actool did not rewrite AWS config", selectedProfile))
 				}
 			}
 		}
 		existing := strings.TrimSpace(defaultSection.Key(CredentialProcess).String())
 		if existing != "" && !p.isActoolCredentialProcess(existing) {
-			return errors.New("default profile already has a different credential_process; remove it before selecting a profile with actool")
+			return p.configConflictError("default profile already has a different credential_process; remove it before selecting a profile with actool")
 		}
 		changed = ensureKey(defaultSection, CredentialProcess, p.credentialProcessCommand(selectedProfile)) || changed
 		changed = p.copySelectedProfileConfig(cfg, defaultSection, selectedProfile) || changed
@@ -1010,6 +1060,18 @@ func (p *profile) syncConfig(selectedProfile string, profileNames []string) erro
 		return nil
 	}
 	return saveConfigAtomic(p.configPath, cfg)
+}
+
+func (p *profile) configConflictError(message string) error {
+	configPath := p.configPath
+	if strings.TrimSpace(configPath) == "" {
+		configPath = "~/.aws/config"
+	}
+	return errguide.New(message,
+		fmt.Sprintf("Inspect `%s` and remove or move the conflicting role, static credential, or credential_process setting if actool should manage it.", configPath),
+		"If the profile belongs to another credential provider, choose a different profile instead.",
+		"Run actool again after resolving the configuration conflict.",
+	)
 }
 
 func (p *profile) copySelectedProfileConfig(cfg *ini.File, defaultSection *ini.Section, selectedProfile string) bool {

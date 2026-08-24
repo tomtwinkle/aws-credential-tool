@@ -54,6 +54,18 @@ it can be selected explicitly with `AWS_VAULT_BACKEND=pass`.
    $ aws configure --profile "AWS Account Prod"
    ```
 
+   When starting with an existing `aws-vault` setup, populate the compatible
+   secure store directly instead of creating a plaintext credentials file:
+
+   ```console
+   $ aws-vault add example-develop
+   $ aws-vault add example-stage
+   ```
+
+   `actool` discovers these profiles from the `aws-vault` namespace. Use the
+   same backend, file directory, and keychain settings for both commands when
+   a non-default backend is configured.
+
 2. Run `actool`.
 
    `~/.aws/credentials` is imported into the secure store. The first
@@ -157,8 +169,16 @@ Do not put long-lived secrets in shell history, CI logs, or
 
 ## Troubleshooting
 
+Actionable runtime errors include a `How to fix:` section with the next
+commands or configuration changes. Apply those steps, then run `actool` again
+when the message instructs you to do so.
+
 - `no keyring backend available`: configure the OS keyring, or explicitly opt
   into an available `file`/`pass` backend as described above.
+- `Profile not defined.`: add a profile with `aws-vault add <profile>`, or use
+  `aws configure --profile <profile>` and run `actool` again.
+- `actool is not initialized`: run `actool` once to synchronize
+  `~/.aws/config` before invoking `credential-process` from AWS CLI.
 - `different credential_process`: the profile already belongs to another
   credential provider. Remove or deliberately change that provider before
   selecting it in `actool`.

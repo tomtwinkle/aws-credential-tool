@@ -80,40 +80,49 @@ func TestRunVersionFlags(t *testing.T) {
 func TestRunWithoutArgumentsReturnsUIInitializationError(t *testing.T) {
 	configureIsolatedRuntime(t)
 
-	assert.ErrorContains(t, run(nil), "Profile not defined.")
+	err := run(nil)
+	assert.ErrorContains(t, err, "Profile not defined.")
+	assert.ErrorContains(t, err, "How to fix:")
+	assert.ErrorContains(t, err, "aws-vault add <profile>")
 }
 
 func TestRunArgumentValidation(t *testing.T) {
 	cases := []struct {
-		name string
-		args []string
-		want string
+		name      string
+		args      []string
+		want      string
+		wantGuide string
 	}{
-		{name: "unknown command", args: []string{"unknown"}, want: "unknown command: unknown"},
-		{name: "unknown flag", args: []string{"--unknown"}, want: "flag provided but not defined"},
+		{name: "unknown command", args: []string{"unknown"}, want: "unknown command: unknown", wantGuide: "Run `actool` for interactive mode"},
+		{name: "unknown flag", args: []string{"--unknown"}, want: "flag provided but not defined", wantGuide: "Run `actool` for interactive mode"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.ErrorContains(t, run(tc.args), tc.want)
+			err := run(tc.args)
+			assert.ErrorContains(t, err, tc.want)
+			assert.ErrorContains(t, err, tc.wantGuide)
 		})
 	}
 }
 
 func TestRunCredentialProcessArgumentValidation(t *testing.T) {
 	cases := []struct {
-		name string
-		args []string
-		want string
+		name      string
+		args      []string
+		want      string
+		wantGuide string
 	}{
-		{name: "unexpected positional argument", args: []string{"--profile", "dev", "extra"}, want: "unexpected arguments"},
-		{name: "unknown flag", args: []string{"--unknown"}, want: "flag provided but not defined"},
-		{name: "missing flag value", args: []string{"--profile"}, want: "flag needs an argument"},
+		{name: "unexpected positional argument", args: []string{"--profile", "dev", "extra"}, want: "unexpected arguments", wantGuide: "Use `actool credential-process --profile <profile>`"},
+		{name: "unknown flag", args: []string{"--unknown"}, want: "flag provided but not defined", wantGuide: "Use `actool credential-process --profile <profile>`"},
+		{name: "missing flag value", args: []string{"--profile"}, want: "flag needs an argument", wantGuide: "Use `actool credential-process --profile <profile>`"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.ErrorContains(t, runCredentialProcess(tc.args), tc.want)
+			err := runCredentialProcess(tc.args)
+			assert.ErrorContains(t, err, tc.want)
+			assert.ErrorContains(t, err, tc.wantGuide)
 		})
 	}
 }
@@ -150,15 +159,17 @@ func TestRunCredentialProcessSuccess(t *testing.T) {
 
 func TestRunCredentialProcessErrors(t *testing.T) {
 	cases := []struct {
-		name    string
-		setup   func(*testing.T)
-		args    []string
-		wantErr string
+		name      string
+		setup     func(*testing.T)
+		args      []string
+		wantErr   string
+		wantGuide string
 	}{
 		{
-			name:    "profile is not initialized",
-			setup:   func(t *testing.T) { configureIsolatedRuntime(t) },
-			wantErr: "not initialized",
+			name:      "profile is not initialized",
+			setup:     func(t *testing.T) { configureIsolatedRuntime(t) },
+			wantErr:   "not initialized",
+			wantGuide: "Run `actool` once to synchronize",
 		},
 		{
 			name: "profile backend cannot be opened",
@@ -166,14 +177,17 @@ func TestRunCredentialProcessErrors(t *testing.T) {
 				configureIsolatedRuntime(t)
 				t.Setenv("AWS_VAULT_BACKEND", "invalid-backend")
 			},
-			wantErr: "backend",
+			wantErr:   "backend",
+			wantGuide: "Unlock or configure an OS keyring",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.setup(t)
-			assert.ErrorContains(t, runCredentialProcess(tc.args), tc.wantErr)
+			err := runCredentialProcess(tc.args)
+			assert.ErrorContains(t, err, tc.wantErr)
+			assert.ErrorContains(t, err, tc.wantGuide)
 		})
 	}
 }
