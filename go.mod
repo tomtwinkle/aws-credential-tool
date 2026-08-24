@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.36
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.6
 	github.com/chzyer/readline v1.5.1
+	github.com/creack/pty v1.1.24
 	github.com/magefile/mage v1.17.2
 	github.com/manifoldco/promptui v0.9.0
 	gopkg.in/ini.v1 v1.67.3

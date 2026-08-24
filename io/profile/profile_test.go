@@ -414,6 +414,7 @@ func TestConfigAndCredentialLookup(t *testing.T) {
 	model := &Model{Configs: []*Config{
 		{Name: Default, Region: "ap-northeast-1"},
 		{Name: "dev", Region: "us-west-2"},
+		{Name: "example", Region: ""},
 	}}
 
 	credentialCases := []struct {
@@ -443,6 +444,7 @@ func TestConfigAndCredentialLookup(t *testing.T) {
 	}{
 		{name: Default, wantRegion: "ap-northeast-1"},
 		{name: "dev", wantRegion: "us-west-2"},
+		{name: "example", wantRegion: "ap-northeast-1"},
 		{name: "missing", wantRegion: "ap-northeast-1"},
 	}
 	for _, tc := range configCases {
