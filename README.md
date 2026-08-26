@@ -34,6 +34,9 @@ draft; rerun the Release workflow with that tag in the optional `tag` input.
 - STS session credentials use the `aws-vault` session-key format.
 - `~/.aws/config` is updated atomically; unrelated role, SSO, and external
   `credential_process` profiles are preserved.
+- During configuration sync, empty provider settings such as `sso_session =`
+  are removed automatically. Non-empty SSO, role, web-identity, and external
+  provider settings are never removed automatically.
 - `actool credential-process` is read-only. It never imports files, rewrites
   configuration, or deletes credentials.
 - An expired session is never silently replaced with long-lived credentials.
@@ -152,6 +155,9 @@ Useful compatibility settings include:
 
 - `AWS_REGION` and `AWS_DEFAULT_REGION`: STS region overrides. A selected
   profile without its own `region` inherits `[default]`'s region.
+- `mfa_serial`: optional MFA device serial or ARN in `[default]` or the
+  selected `[profile <name>]`. It is useful when the device name differs from
+  the IAM user name or when using the AWS GovCloud/China partitions.
 - `AWS_VAULT_BACKEND`: `keychain`, `wincred`, `secret-service`, `kwallet`,
   `keyctl`, `file`, or `pass`, subject to the current platform.
 - `AWS_VAULT_FILE_DIR`: encrypted-file keyring directory; defaults to
@@ -182,14 +188,23 @@ when the message instructs you to do so.
 - `different credential_process`: the profile already belongs to another
   credential provider. Remove or deliberately change that provider before
   selecting it in `actool`.
-- `The specified sso-session does not exist: ""`: inspect
-  `~/.aws/config` for an empty `sso_session =`. If the profile is an SSO
-  profile, set a non-empty session name and add the matching
-  `[sso-session <name>]` section. Otherwise remove the incomplete SSO setting
-  and select the vault-backed profile in `actool` again.
+- `The specified sso-session does not exist: ""`: run `actool` once so the
+  configuration sync can remove an empty `sso_session =` automatically. If
+  the profile is intended to remain an SSO profile, set a non-empty session
+  name and add the matching `[sso-session <name>]` section first. Non-empty
+  SSO settings are preserved, so choose a vault-backed profile or fix the SSO
+  configuration explicitly before running `actool` again.
 - `AWS region is not configured`: add `region = <region>` to `[default]` or
   the selected `[profile <name>]`, or set `AWS_REGION` or
   `AWS_DEFAULT_REGION`.
+- `MFA serial number is not available`: add `mfa_serial = <MFA device serial
+  or ARN>` to the selected profile, then retry the session-token action. Use
+  long-lived IAM user credentials for `GetSessionToken`; assumed-role or
+  already-expired session credentials cannot be used as its source.
+- AWS CLI still uses the wrong profile or SSO session: check `AWS_PROFILE` and
+  unset it or use the intended `--profile`. Also unset
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` when
+  they should not override the profile's `credential_process`.
 - expired session credentials: run `actool` and choose
   `Set choose sessionToken.` again.
 

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,14 @@ func TestServiceRequestsProvideActionableFailures(t *testing.T) {
 			wantGuide: "Verify the AWS region",
 		},
 		{
+			name:      "session token failure explains recovery",
+			operation: "GetSessionToken",
+			status:    http.StatusInternalServerError,
+			response:  "example STS failure",
+			wantError: "sts fail",
+			wantGuide: "Verify the AWS region",
+		},
+		{
 			name:      "empty session credentials explains recovery",
 			operation: "GetSessionToken",
 			response:  `<?xml version="1.0"?><GetSessionTokenResponse><GetSessionTokenResult></GetSessionTokenResult></GetSessionTokenResponse>`,
@@ -183,6 +192,165 @@ func TestServiceRequestsProvideActionableFailures(t *testing.T) {
 			assert.Equal(t, token.AccessKey, tc.wantAccessKey)
 			assert.Equal(t, token.SecretKey, tc.wantSecretKey)
 			assert.Equal(t, token.SessionToken, tc.wantSession)
+		})
+	}
+}
+
+func TestMFASerialFromCallerARN(t *testing.T) {
+	cases := []struct {
+		name         string
+		callerARN    string
+		account      string
+		wantSerial   string
+		wantUserName string
+	}{
+		{
+			name:         "standard IAM user",
+			callerARN:    "arn:aws:iam::123456789012:user/example-user",
+			account:      "123456789012",
+			wantSerial:   "arn:aws:iam::123456789012:mfa/example-user",
+			wantUserName: "example-user",
+		},
+		{
+			name:         "government IAM user",
+			callerARN:    "arn:aws-us-gov:iam::123456789012:user/example-user",
+			account:      "123456789012",
+			wantSerial:   "arn:aws-us-gov:iam::123456789012:mfa/example-user",
+			wantUserName: "example-user",
+		},
+		{
+			name:         "assumed role has no user MFA serial",
+			callerARN:    "arn:aws:sts::123456789012:assumed-role/example-role/example-session",
+			account:      "123456789012",
+			wantUserName: "example-session",
+		},
+		{
+			name:         "malformed caller ARN keeps a display name",
+			callerARN:    "example-session",
+			wantUserName: "example-session",
+		},
+		{
+			name:         "IAM user without an account cannot derive a serial",
+			callerARN:    "arn:aws:iam:::user/example-user",
+			wantUserName: "example-user",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			serial, userName := mfaSerialFromCallerARN(tc.callerARN, tc.account)
+			assert.Equal(t, serial, tc.wantSerial)
+			assert.Equal(t, userName, tc.wantUserName)
+		})
+	}
+}
+
+func TestResolveMFASerialRequiresSource(t *testing.T) {
+	service := &service{region: "us-west-2"}
+	cases := []struct {
+		name     string
+		serial   string
+		userName string
+	}{
+		{name: "missing account and user", serial: "", userName: ""},
+		{name: "missing account", serial: "", userName: "example-user"},
+		{name: "missing user", serial: "123456789012", userName: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.resolveMFASerial(tc.serial, tc.userName)
+			assert.ErrorContains(t, err, "MFA serial number is not available")
+			assert.ErrorContains(t, err, "mfa_serial")
+		})
+	}
+}
+
+func TestPartitionForRegion(t *testing.T) {
+	cases := []struct {
+		name   string
+		region string
+		want   string
+	}{
+		{name: "standard", region: "us-west-2", want: "aws"},
+		{name: "china", region: "cn-north-1", want: "aws-cn"},
+		{name: "government", region: "us-gov-west-1", want: "aws-us-gov"},
+		{name: "secret", region: "us-iso-east-1", want: "aws-iso"},
+		{name: "secret restricted", region: "us-iso-b-east-1", want: "aws-iso-b"},
+		{name: "europe sovereign", region: "eu-isoe-west-1", want: "aws-eusc"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, partitionForRegion(tc.region), tc.want)
+		})
+	}
+}
+
+func TestServiceRequestsRequireRegion(t *testing.T) {
+	t.Setenv("AWS_ENDPOINT_URL_STS", "")
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+	service := NewService("EXAMPLEACCESSKEY", "EXAMPLESECRETKEY", "")
+	_, accountErr := service.Account()
+	assert.ErrorContains(t, accountErr, "AWS region is not configured")
+	_, tokenErr := service.SessionToken(43200, "123456789012", "example-user", "123456")
+	assert.ErrorContains(t, tokenErr, "AWS region is not configured")
+}
+
+func TestSessionTokenSendsCorrectMFASerial(t *testing.T) {
+	cases := []struct {
+		name             string
+		region           string
+		configuredSerial string
+		wantSerial       string
+	}{
+		{
+			name:       "standard partition from region",
+			region:     "us-west-2",
+			wantSerial: "arn:aws:iam::123456789012:mfa/example-user",
+		},
+		{
+			name:       "china partition from region",
+			region:     "cn-north-1",
+			wantSerial: "arn:aws-cn:iam::123456789012:mfa/example-user",
+		},
+		{
+			name:             "configured device ARN",
+			region:           "us-gov-west-1",
+			configuredSerial: "arn:aws-us-gov:iam::123456789012:mfa/example-device",
+			wantSerial:       "arn:aws-us-gov:iam::123456789012:mfa/example-device",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, readErr := io.ReadAll(r.Body)
+				assert.NilError(t, readErr)
+				values, parseErr := url.ParseQuery(string(body))
+				assert.NilError(t, parseErr)
+				assert.Equal(t, values.Get("Action"), "GetSessionToken")
+				assert.Equal(t, values.Get("SerialNumber"), tc.wantSerial)
+				w.Header().Set("Content-Type", "text/xml")
+				_, _ = io.WriteString(w, `<?xml version="1.0"?><GetSessionTokenResponse><GetSessionTokenResult><Credentials><SessionToken>EXAMPLESESSIONTOKEN</SessionToken><SecretAccessKey>EXAMPLESESSIONSECRET</SecretAccessKey><Expiration>2030-01-02T03:04:05Z</Expiration><AccessKeyId>EXAMPLESESSIONACCESS</AccessKeyId></Credentials></GetSessionTokenResult></GetSessionTokenResponse>`)
+			}))
+			defer server.Close()
+
+			t.Setenv("AWS_ENDPOINT_URL_STS", server.URL)
+			t.Setenv("AWS_REGION", tc.region)
+			t.Setenv("AWS_DEFAULT_REGION", "")
+			t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "config"))
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
+			t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+			service := NewServiceWithMFASerial("EXAMPLEACCESSKEY", "EXAMPLESECRETKEY", tc.region, tc.configuredSerial)
+			_, err := service.SessionToken(43200, "123456789012", "example-user", "123456")
+			assert.NilError(t, err)
 		})
 	}
 }
