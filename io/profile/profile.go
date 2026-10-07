@@ -151,12 +151,6 @@ type secretPreviousValue struct {
 	exists bool
 }
 
-type configSnapshot struct {
-	exists bool
-	data   []byte
-	mode   os.FileMode
-}
-
 func NewProfile() (Profile, error) {
 	return newRuntimeProfile(nil)
 }
@@ -402,15 +396,11 @@ func (p *profile) Load() (*Model, error) {
 			state.LegacyCleanupPending = false
 		}
 
-		snapshot, snapshotErr := p.snapshotConfig()
-		if snapshotErr != nil {
-			return nil, snapshotErr
-		}
 		if err := p.syncConfig(selectedProfile, profileNames); err != nil {
 			return nil, err
 		}
 		if err := p.saveState(state); err != nil {
-			return nil, p.restoreConfigAfterStateSaveFailure(snapshot, err)
+			return nil, stateSaveAfterConfigSyncError(p.configPath, selectedProfile, err)
 		}
 	}
 
@@ -495,10 +485,6 @@ func (p *profile) SetSelected(profileName string) error {
 	if err != nil && !errors.Is(err, errStateNotFound) {
 		return err
 	}
-	snapshot, snapshotErr := p.snapshotConfig()
-	if snapshotErr != nil {
-		return snapshotErr
-	}
 	if err := p.syncConfig(profileName, profileNames); err != nil {
 		return err
 	}
@@ -506,7 +492,7 @@ func (p *profile) SetSelected(profileName string) error {
 	state.Version = stateVersion
 	state.SelectedProfile = profileName
 	if err := p.saveState(state); err != nil {
-		return p.restoreConfigAfterStateSaveFailure(snapshot, err)
+		return stateSaveAfterConfigSyncError(p.configPath, profileName, err)
 	}
 	return nil
 }
@@ -1230,36 +1216,8 @@ func (p *profile) loadConfigFile() (*ini.File, error) {
 	return cfg, nil
 }
 
-func (p *profile) snapshotConfig() (configSnapshot, error) {
-	info, err := os.Stat(p.configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return configSnapshot{}, nil
-		}
-		return configSnapshot{}, err
-	}
-	data, err := os.ReadFile(p.configPath)
-	if err != nil {
-		return configSnapshot{}, err
-	}
-	return configSnapshot{exists: true, data: data, mode: info.Mode().Perm()}, nil
-}
-
-func (p *profile) restoreConfigAfterStateSaveFailure(snapshot configSnapshot, saveErr error) error {
-	var restoreErr error
-	if snapshot.exists {
-		mode := snapshot.mode
-		if mode == 0 {
-			mode = 0o600
-		}
-		restoreErr = writeFileAtomic(p.configPath, snapshot.data, mode)
-	} else {
-		restoreErr = removeIfExists(p.configPath)
-	}
-	if restoreErr != nil {
-		return fmt.Errorf("%w; config rollback failed: %v", saveErr, restoreErr)
-	}
-	return saveErr
+func stateSaveAfterConfigSyncError(configPath, selectedProfile string, saveErr error) error {
+	return fmt.Errorf("%w; AWS config %q may reflect profile %q while selection state may be unchanged; config was not rolled back because rollback could overwrite a concurrent edit", saveErr, configPath, selectedProfile)
 }
 
 func (p *profile) loadState() (profileState, error) {

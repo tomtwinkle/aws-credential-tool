@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,8 @@ type fakeSecretStore struct {
 }
 
 type failingStateStore struct {
-	err error
+	err    error
+	onSave func()
 }
 
 func (f *failingStateStore) Load() (profileState, error) {
@@ -31,6 +33,9 @@ func (f *failingStateStore) Load() (profileState, error) {
 }
 
 func (f *failingStateStore) Save(profileState) error {
+	if f.onSave != nil {
+		f.onSave()
+	}
 	return f.err
 }
 
@@ -814,7 +819,7 @@ func TestStoreSessionTokenKeepsExistingSessionWhenReplacementFails(t *testing.T)
 	assert.ErrorIs(t, newErr, errSecretNotFound)
 }
 
-func TestSetSelectedRestoresConfigWhenStateSaveFails(t *testing.T) {
+func TestSetSelectedDoesNotRollbackConfigWhenStateSaveFails(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config")
 	original := "[default]\n\n[profile dev]\nregion = us-west-2\n"
@@ -836,7 +841,95 @@ func TestSetSelectedRestoresConfigWhenStateSaveFails(t *testing.T) {
 	assert.ErrorContains(t, err, "state save failed")
 	configData, readErr := os.ReadFile(configPath)
 	assert.NilError(t, readErr)
-	assert.Equal(t, string(configData), original)
+	assert.Assert(t, strings.Contains(string(configData), "credential_process = actool credential-process --profile dev"))
+	assert.ErrorContains(t, err, "config was not rolled back")
+	assert.ErrorContains(t, err, "concurrent edit")
+}
+
+func TestSetSelectedPreservesConcurrentConfigEditWhenStateSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	original := "[default]\n\n[profile dev]\nregion = us-west-2\n"
+	externalEdit := "[default]\nregion = eu-west-1\n\n[profile dev]\nregion = us-west-2\n# edited by another process\n"
+	writeTestFile(t, configPath, original)
+	store := newFakeSecretStore()
+	var editErr error
+	var syncedConfig string
+	stateStore := &failingStateStore{
+		err: errors.New("state save failed"),
+		onSave: func() {
+			synced, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				editErr = readErr
+				return
+			}
+			syncedConfig = string(synced)
+			editErr = os.WriteFile(configPath, []byte(externalEdit), 0o600)
+		},
+	}
+	p := newConfiguredProfile(
+		configPath,
+		filepath.Join(dir, "credentials"),
+		"actool",
+		store,
+		stateStore,
+		nil,
+		nil,
+	)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+	storeBaseCredential(t, p, "dev", "DEVACCESSKEY", "DEVSECRETKEY", nil)
+
+	err := p.SetSelected("dev")
+	assert.NilError(t, editErr)
+	assert.Assert(t, strings.Contains(syncedConfig, "credential_process = actool credential-process --profile dev"))
+	configData, readErr := os.ReadFile(configPath)
+	assert.NilError(t, readErr)
+	assert.Equal(t, string(configData), externalEdit)
+	assert.ErrorContains(t, err, "state save failed")
+	assert.ErrorContains(t, err, "config was not rolled back")
+	assert.ErrorContains(t, err, configPath)
+}
+
+func TestLoadPreservesConcurrentConfigEditWhenStateSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	original := "[default]\nregion = us-west-2\n"
+	externalEdit := "[default]\nregion = eu-west-1\n# edited by another process\n"
+	writeTestFile(t, configPath, original)
+	store := newFakeSecretStore()
+	var editErr error
+	var syncedConfig string
+	stateStore := &failingStateStore{
+		err: errors.New("state save failed"),
+		onSave: func() {
+			synced, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				editErr = readErr
+				return
+			}
+			syncedConfig = string(synced)
+			editErr = os.WriteFile(configPath, []byte(externalEdit), 0o600)
+		},
+	}
+	p := newConfiguredProfile(
+		configPath,
+		filepath.Join(dir, "credentials"),
+		"actool",
+		store,
+		stateStore,
+		nil,
+		nil,
+	)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+
+	_, err := p.Load()
+	assert.NilError(t, editErr)
+	assert.Assert(t, strings.Contains(syncedConfig, "credential_process = actool credential-process --profile default"))
+	assert.ErrorContains(t, err, "state save failed")
+	assert.ErrorContains(t, err, "config was not rolled back")
+	configData, readErr := os.ReadFile(configPath)
+	assert.NilError(t, readErr)
+	assert.Equal(t, string(configData), externalEdit)
 }
 
 func TestMigratesPreviousActoolSecureStore(t *testing.T) {

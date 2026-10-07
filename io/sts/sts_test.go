@@ -276,8 +276,11 @@ func TestPartitionForRegion(t *testing.T) {
 		{name: "china", region: "cn-north-1", want: "aws-cn"},
 		{name: "government", region: "us-gov-west-1", want: "aws-us-gov"},
 		{name: "secret", region: "us-iso-east-1", want: "aws-iso"},
-		{name: "secret restricted", region: "us-iso-b-east-1", want: "aws-iso-b"},
-		{name: "europe sovereign", region: "eu-isoe-west-1", want: "aws-eusc"},
+		{name: "secret restricted", region: "us-isob-east-1", want: "aws-iso-b"},
+		{name: "future secret east", region: "us-isof-east-1", want: "aws-iso-f"},
+		{name: "future secret south", region: "us-isof-south-1", want: "aws-iso-f"},
+		{name: "europe secret", region: "eu-isoe-west-1", want: "aws-iso-e"},
+		{name: "europe sovereign", region: "eusc-de-east-1", want: "aws-eusc"},
 	}
 
 	for _, tc := range cases {
