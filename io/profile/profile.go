@@ -29,6 +29,7 @@ const (
 	OriginalAWSSecretAccessKey = "original_aws_secret_access_key"
 	Region                     = "region"
 	Output                     = "output"
+	MFASerial                  = "mfa_serial"
 	CredentialProcess          = "credential_process"
 
 	defaultCommandName       = "actool"
@@ -85,6 +86,7 @@ type Config struct {
 	Name              string
 	Region            string
 	Output            string
+	MFASerial         string
 	CredentialProcess string
 }
 
@@ -398,7 +400,7 @@ func (p *profile) Load() (*Model, error) {
 			return nil, err
 		}
 		if err := p.saveState(state); err != nil {
-			return nil, err
+			return nil, stateSaveAfterConfigSyncError(p.configPath, selectedProfile, err)
 		}
 	}
 
@@ -442,10 +444,16 @@ func (p *profile) Config(model *Model, profileName string) (*Config, error) {
 	if selectedConfig != nil {
 		// AWS profiles commonly keep shared settings such as region in the
 		// default section. Preserve that compatibility when the selected
-		// profile does not define its own region.
-		if strings.TrimSpace(selectedConfig.Region) == "" && defaultConfig != nil && selectedConfig != defaultConfig {
+		// profile does not define its own region or MFA device.
+		if defaultConfig != nil && selectedConfig != defaultConfig &&
+			(strings.TrimSpace(selectedConfig.Region) == "" || strings.TrimSpace(selectedConfig.MFASerial) == "") {
 			resolved := *selectedConfig
-			resolved.Region = defaultConfig.Region
+			if strings.TrimSpace(resolved.Region) == "" {
+				resolved.Region = defaultConfig.Region
+			}
+			if strings.TrimSpace(resolved.MFASerial) == "" {
+				resolved.MFASerial = defaultConfig.MFASerial
+			}
 			return &resolved, nil
 		}
 		return selectedConfig, nil
@@ -484,7 +492,7 @@ func (p *profile) SetSelected(profileName string) error {
 	state.Version = stateVersion
 	state.SelectedProfile = profileName
 	if err := p.saveState(state); err != nil {
-		return err
+		return stateSaveAfterConfigSyncError(p.configPath, profileName, err)
 	}
 	return nil
 }
@@ -656,20 +664,6 @@ func (p *profile) storeSessionCredential(credential *Credential) error {
 		return err
 	}
 
-	keys, err := p.secrets.Keys()
-	if err != nil {
-		return err
-	}
-	for _, key := range keys {
-		metadata, ok := parseSessionKey(key)
-		if !ok || metadata.Type != sessionTypeGetSession || metadata.ProfileName != credential.Name || metadata.MFASerial != credential.MFASerial {
-			continue
-		}
-		if err := p.removeSecret(key); err != nil {
-			return err
-		}
-	}
-
 	metadata := sessionMetadata{
 		Type:        sessionTypeGetSession,
 		ProfileName: credential.Name,
@@ -686,7 +680,32 @@ func (p *profile) storeSessionCredential(credential *Credential) error {
 	if err != nil {
 		return err
 	}
-	return p.secrets.Set(sessionKey(metadata), encoded)
+	newKey := sessionKey(metadata)
+	// Capture obsolete keys before publishing the replacement. Enumerating
+	// afterward could include another writer's new session and delete it.
+	keys, err := p.secrets.Keys()
+	if err != nil {
+		return err
+	}
+	// Write the replacement before deleting the old session. A keyring write
+	// can fail, and deleting first would make the still-valid session unusable.
+	if err := p.secrets.Set(newKey, encoded); err != nil {
+		return err
+	}
+
+	for _, key := range keys {
+		if key == newKey {
+			continue
+		}
+		storedMetadata, ok := parseSessionKey(key)
+		if !ok || storedMetadata.Type != sessionTypeGetSession || storedMetadata.ProfileName != credential.Name || storedMetadata.MFASerial != credential.MFASerial {
+			continue
+		}
+		if err := p.removeSecret(key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *profile) baseCredential(profileName string) (*Credential, error) {
@@ -999,11 +1018,12 @@ func (p *profile) syncConfig(selectedProfile string, profileNames []string) erro
 	if err != nil {
 		return err
 	}
+	repaired := repairEmptyConfigKeys(cfg)
 	defaultSection, created, err := ensureSection(cfg, Default)
 	if err != nil {
 		return err
 	}
-	changed := created
+	changed := created || repaired
 
 	if selectedProfile != "" {
 		if hasCredentialSource(defaultSection) {
@@ -1068,7 +1088,8 @@ func (p *profile) configConflictError(message string) error {
 		configPath = "~/.aws/config"
 	}
 	return errguide.New(message,
-		fmt.Sprintf("Inspect `%s` and remove or move the conflicting role, static credential, or credential_process setting if actool should manage it.", configPath),
+		fmt.Sprintf("Inspect `%s` and remove or move the conflicting role, SSO, static credential, or credential_process setting if actool should manage it.", configPath),
+		"For an SSO profile, make sure `sso_session` is non-empty and matches an existing `[sso-session <name>]` section.",
 		"If the profile belongs to another credential provider, choose a different profile instead.",
 		"Run actool again after resolving the configuration conflict.",
 	)
@@ -1083,6 +1104,9 @@ func (p *profile) copySelectedProfileConfig(cfg *ini.File, defaultSection *ini.S
 	}
 	changed := false
 	for _, keyName := range []string{Region, Output} {
+		if !sourceSection.HasKey(keyName) {
+			continue
+		}
 		value := strings.TrimSpace(sourceSection.Key(keyName).String())
 		if value != "" {
 			changed = ensureKey(defaultSection, keyName, value) || changed
@@ -1109,19 +1133,36 @@ func (p *profile) isActoolCredentialProcess(value string) bool {
 	return filepath.Base(p.commandName) == defaultCommandName && filepath.Base(commandName) == defaultCommandName
 }
 
+var credentialSourceKeys = []string{
+	"role_arn",
+	"source_profile",
+	"credential_source",
+	"web_identity_token_file",
+	"web_identity_token_process",
+	"sso_start_url",
+	"sso_session",
+	"sso_account_id",
+	"sso_role_name",
+}
+
+var repairableConfigKeys = append(append([]string(nil), credentialSourceKeys...), MFASerial)
+
+func repairEmptyConfigKeys(cfg *ini.File) bool {
+	changed := false
+	for _, section := range cfg.Sections() {
+		for _, keyName := range repairableConfigKeys {
+			if section.HasKey(keyName) && strings.TrimSpace(section.Key(keyName).String()) == "" {
+				section.DeleteKey(keyName)
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 func hasCredentialSource(section *ini.Section) bool {
-	for _, keyName := range []string{
-		"role_arn",
-		"source_profile",
-		"credential_source",
-		"web_identity_token_file",
-		"web_identity_token_process",
-		"sso_start_url",
-		"sso_session",
-		"sso_account_id",
-		"sso_role_name",
-	} {
-		if strings.TrimSpace(section.Key(keyName).String()) != "" {
+	for _, keyName := range credentialSourceKeys {
+		if section.HasKey(keyName) && strings.TrimSpace(section.Key(keyName).String()) != "" {
 			return true
 		}
 	}
@@ -1130,7 +1171,7 @@ func hasCredentialSource(section *ini.Section) bool {
 
 func hasStaticCredentials(section *ini.Section) bool {
 	for _, keyName := range []string{AWSAccessKeyId, AWSSecretAccessKey, AWSSessionToken} {
-		if strings.TrimSpace(section.Key(keyName).String()) != "" {
+		if section.HasKey(keyName) && strings.TrimSpace(section.Key(keyName).String()) != "" {
 			return true
 		}
 	}
@@ -1152,6 +1193,7 @@ func (p *profile) loadConfigs() ([]*Config, error) {
 			Name:              profileName,
 			Region:            strings.TrimSpace(section.Key(Region).String()),
 			Output:            strings.TrimSpace(section.Key(Output).String()),
+			MFASerial:         strings.TrimSpace(section.Key(MFASerial).String()),
 			CredentialProcess: strings.TrimSpace(section.Key(CredentialProcess).String()),
 		})
 	}
@@ -1174,6 +1216,10 @@ func (p *profile) loadConfigFile() (*ini.File, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func stateSaveAfterConfigSyncError(configPath, selectedProfile string, saveErr error) error {
+	return fmt.Errorf("%w; AWS config %q may reflect profile %q while selection state may be unchanged; config was not rolled back because rollback could overwrite a concurrent edit", saveErr, configPath, selectedProfile)
 }
 
 func (p *profile) loadState() (profileState, error) {

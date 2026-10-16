@@ -147,7 +147,7 @@ func (u *ui) modeActionSelect() error {
 
 func (u *ui) modeSTS() error {
 	u.mode = model.SelectModeSTS
-	sts := mode.NewModeSTS(u.selectCredential.AccessKey, u.selectCredential.SecretKey, u.selectConfig.Region)
+	sts := mode.NewModeSTSWithMFASerial(u.selectCredential.AccessKey, u.selectCredential.SecretKey, u.selectConfig.Region, u.selectConfig.MFASerial)
 	sToken, err := sts.GetSessionToken()
 	if err != nil {
 		return err

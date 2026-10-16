@@ -2,10 +2,10 @@ package mode
 
 import (
 	"fmt"
+
 	"github.com/manifoldco/promptui"
 	"github.com/tomtwinkle/aws-credential-tool/internal/errguide"
 	"github.com/tomtwinkle/aws-credential-tool/io/sts"
-	"strconv"
 )
 
 type STSInput interface {
@@ -13,12 +13,19 @@ type STSInput interface {
 }
 
 type stsInput struct {
-	sts sts.Service
+	sts         sts.Service
+	promptToken func(account string, userName string) (string, error)
 }
 
 func NewModeSTS(accessKey string, secretKey string, region string) STSInput {
-	s := sts.NewService(accessKey, secretKey, region)
-	return &stsInput{sts: s}
+	return NewModeSTSWithMFASerial(accessKey, secretKey, region, "")
+}
+
+func NewModeSTSWithMFASerial(accessKey string, secretKey string, region string, mfaSerial string) STSInput {
+	s := sts.NewServiceWithMFASerial(accessKey, secretKey, region, mfaSerial)
+	input := &stsInput{sts: s}
+	input.promptToken = input.inputToken
+	return input
 }
 
 func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
@@ -27,12 +34,16 @@ func (s *stsInput) GetSessionToken() (*sts.SessionToken, error) {
 		return nil, err
 	}
 
-	token, err := s.inputToken(account.Account, account.UserName)
+	promptToken := s.promptToken
+	if promptToken == nil {
+		promptToken = s.inputToken
+	}
+	token, err := promptToken(account.Account, account.UserName)
 	if err != nil {
 		return nil, err
 	}
 
-	sToken, err := s.sts.SessionToken(43200, account.Account, account.UserName, token)
+	sToken, err := s.sts.SessionToken(43200, account.MFASerial, account.UserName, token)
 	if err != nil {
 		return nil, err
 	}
@@ -58,18 +69,19 @@ func (s *stsInput) inputToken(account string, userName string) (string, error) {
 }
 
 func validateMFAToken(input string) error {
-	_, err := strconv.ParseFloat(input, 64)
-	if err != nil {
-		return errguide.New("Invalid number",
-			"Enter the current six-digit numeric MFA token.",
-			"Retry before the token expires.",
-		) //nolint:staticcheck // preserve the existing user-facing prompt text
-	}
 	if len(input) != 6 {
 		return errguide.New("Invalid Token.",
 			"Enter the current six-digit numeric MFA token.",
 			"Retry before the token expires.",
 		) //nolint:staticcheck // preserve the existing user-facing prompt text
+	}
+	for i := 0; i < len(input); i++ {
+		if input[i] < '0' || input[i] > '9' {
+			return errguide.New("Invalid number",
+				"Enter the current six-digit numeric MFA token.",
+				"Retry before the token expires.",
+			) //nolint:staticcheck // preserve the existing user-facing prompt text
+		}
 	}
 	return nil
 }

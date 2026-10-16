@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,37 @@ type fakeSecretStore struct {
 	failSetKey  string
 	failSetErr  error
 	setCallKeys []string
+}
+
+type interleavingSecretStore struct {
+	*fakeSecretStore
+	afterSet func(string)
+}
+
+func (s *interleavingSecretStore) Set(key string, value []byte) error {
+	if err := s.fakeSecretStore.Set(key, value); err != nil {
+		return err
+	}
+	if s.afterSet != nil {
+		s.afterSet(key)
+	}
+	return nil
+}
+
+type failingStateStore struct {
+	err    error
+	onSave func()
+}
+
+func (f *failingStateStore) Load() (profileState, error) {
+	return profileState{}, errStateNotFound
+}
+
+func (f *failingStateStore) Save(profileState) error {
+	if f.onSave != nil {
+		f.onSave()
+	}
+	return f.err
 }
 
 func newFakeSecretStore() *fakeSecretStore {
@@ -420,7 +452,7 @@ func TestConfigAndCredentialLookup(t *testing.T) {
 	storeBaseCredential(t, p, "dev", "DEVACCESSKEY", "DEVSECRETKEY", nil)
 
 	model := &Model{Configs: []*Config{
-		{Name: Default, Region: "ap-northeast-1"},
+		{Name: Default, Region: "ap-northeast-1", MFASerial: "arn:aws:iam::123456789012:mfa/example-device"},
 		{Name: "dev", Region: "us-west-2"},
 		{Name: "example", Region: ""},
 	}}
@@ -447,19 +479,21 @@ func TestConfigAndCredentialLookup(t *testing.T) {
 	}
 
 	configCases := []struct {
-		name       string
-		wantRegion string
+		name          string
+		wantRegion    string
+		wantMFASerial string
 	}{
-		{name: Default, wantRegion: "ap-northeast-1"},
-		{name: "dev", wantRegion: "us-west-2"},
-		{name: "example", wantRegion: "ap-northeast-1"},
-		{name: "missing", wantRegion: "ap-northeast-1"},
+		{name: Default, wantRegion: "ap-northeast-1", wantMFASerial: "arn:aws:iam::123456789012:mfa/example-device"},
+		{name: "dev", wantRegion: "us-west-2", wantMFASerial: "arn:aws:iam::123456789012:mfa/example-device"},
+		{name: "example", wantRegion: "ap-northeast-1", wantMFASerial: "arn:aws:iam::123456789012:mfa/example-device"},
+		{name: "missing", wantRegion: "ap-northeast-1", wantMFASerial: "arn:aws:iam::123456789012:mfa/example-device"},
 	}
 	for _, tc := range configCases {
 		t.Run("config/"+tc.name, func(t *testing.T) {
 			config, err := p.Config(model, tc.name)
 			assert.NilError(t, err)
 			assert.Equal(t, config.Region, tc.wantRegion)
+			assert.Equal(t, config.MFASerial, tc.wantMFASerial)
 		})
 	}
 
@@ -763,6 +797,188 @@ func TestStoreSessionTokenReplacesOnlyMatchingSession(t *testing.T) {
 	assert.NilError(t, assumeRoleErr)
 }
 
+func TestStoreSessionTokenKeepsExistingSessionWhenReplacementFails(t *testing.T) {
+	store := newFakeSecretStore()
+	p := newTestProfile(t, store)
+	storeBaseCredential(t, p, "dev", "BASEACCESSKEY", "BASESECRETKEY", nil)
+
+	oldExpiration := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	assert.NilError(t, p.storeSessionCredential(&Credential{
+		Name:         "dev",
+		AccessKey:    "OLDACCESSKEY",
+		SecretKey:    "OLDSECRETKEY",
+		SessionToken: "OLDTOKEN",
+		Expiration:   &oldExpiration,
+		MFASerial:    "mfa-1",
+	}))
+	oldKey := sessionKey(sessionMetadata{Type: sessionTypeGetSession, ProfileName: "dev", MFASerial: "mfa-1", Expiration: oldExpiration})
+
+	newExpiration := time.Date(2030, time.February, 2, 3, 4, 5, 0, time.UTC)
+	newKey := sessionKey(sessionMetadata{Type: sessionTypeGetSession, ProfileName: "dev", MFASerial: "mfa-1", Expiration: newExpiration})
+	store.failSetKey = newKey
+	store.failSetErr = errors.New("replacement failed")
+
+	err := p.StoreSessionToken("dev", &Credential{
+		AccessKey:    "NEWACCESSKEY",
+		SecretKey:    "NEWSECRETKEY",
+		SessionToken: "NEWTOKEN",
+		Expiration:   &newExpiration,
+		MFASerial:    "mfa-1",
+	})
+	assert.ErrorContains(t, err, "replacement failed")
+
+	oldData, oldErr := store.Get(oldKey)
+	assert.NilError(t, oldErr)
+	assert.Assert(t, len(oldData) > 0)
+	_, newErr := store.Get(newKey)
+	assert.ErrorIs(t, newErr, errSecretNotFound)
+}
+
+func TestStoreSessionCredentialPreservesConcurrentReplacement(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			store := &interleavingSecretStore{fakeSecretStore: newFakeSecretStore()}
+			dir := t.TempDir()
+			first := newProfile(filepath.Join(dir, "config"), filepath.Join(dir, "credentials"), "actool", store, nil)
+			second := newProfile(filepath.Join(dir, "other-config"), filepath.Join(dir, "other-credentials"), "actool", store, nil)
+			expiration := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+			credential := func(offset time.Duration) *Credential {
+				expires := expiration.Add(offset)
+				return &Credential{Name: "dev", AccessKey: "FIXTUREACCESS", SecretKey: "FIXTURESECRET", SessionToken: "FIXTURETOKEN", Expiration: &expires, MFASerial: "mfa-1"}
+			}
+			if existing {
+				assert.NilError(t, first.storeSessionCredential(credential(-time.Hour)))
+			}
+			latest := credential(time.Second)
+			var concurrentErr error
+			store.afterSet = func(string) {
+				store.afterSet = nil
+				// Model a second process completing its replacement after the first
+				// process writes its token but before it enumerates obsolete keys.
+				concurrentErr = second.storeSessionCredential(latest)
+			}
+			assert.NilError(t, first.storeSessionCredential(credential(0)))
+			assert.NilError(t, concurrentErr)
+			latestKey := sessionKey(sessionMetadata{Type: sessionTypeGetSession, ProfileName: "dev", MFASerial: "mfa-1", Expiration: *latest.Expiration})
+			_, err := store.Get(latestKey)
+			assert.NilError(t, err, "a replacement must not delete a session written concurrently")
+		})
+	}
+}
+
+func TestSetSelectedDoesNotRollbackConfigWhenStateSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	original := "[default]\n\n[profile dev]\nregion = us-west-2\n"
+	writeTestFile(t, configPath, original)
+	store := newFakeSecretStore()
+	p := newConfiguredProfile(
+		configPath,
+		filepath.Join(dir, "credentials"),
+		"actool",
+		store,
+		&failingStateStore{err: errors.New("state save failed")},
+		nil,
+		nil,
+	)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+	storeBaseCredential(t, p, "dev", "DEVACCESSKEY", "DEVSECRETKEY", nil)
+
+	err := p.SetSelected("dev")
+	assert.ErrorContains(t, err, "state save failed")
+	configData, readErr := os.ReadFile(configPath)
+	assert.NilError(t, readErr)
+	assert.Assert(t, strings.Contains(string(configData), "credential_process = actool credential-process --profile dev"))
+	assert.ErrorContains(t, err, "config was not rolled back")
+	assert.ErrorContains(t, err, "concurrent edit")
+}
+
+func TestSetSelectedPreservesConcurrentConfigEditWhenStateSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	original := "[default]\n\n[profile dev]\nregion = us-west-2\n"
+	externalEdit := "[default]\nregion = eu-west-1\n\n[profile dev]\nregion = us-west-2\n# edited by another process\n"
+	writeTestFile(t, configPath, original)
+	store := newFakeSecretStore()
+	var editErr error
+	var syncedConfig string
+	stateStore := &failingStateStore{
+		err: errors.New("state save failed"),
+		onSave: func() {
+			synced, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				editErr = readErr
+				return
+			}
+			syncedConfig = string(synced)
+			editErr = os.WriteFile(configPath, []byte(externalEdit), 0o600)
+		},
+	}
+	p := newConfiguredProfile(
+		configPath,
+		filepath.Join(dir, "credentials"),
+		"actool",
+		store,
+		stateStore,
+		nil,
+		nil,
+	)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+	storeBaseCredential(t, p, "dev", "DEVACCESSKEY", "DEVSECRETKEY", nil)
+
+	err := p.SetSelected("dev")
+	assert.NilError(t, editErr)
+	assert.Assert(t, strings.Contains(syncedConfig, "credential_process = actool credential-process --profile dev"))
+	configData, readErr := os.ReadFile(configPath)
+	assert.NilError(t, readErr)
+	assert.Equal(t, string(configData), externalEdit)
+	assert.ErrorContains(t, err, "state save failed")
+	assert.ErrorContains(t, err, "config was not rolled back")
+	assert.ErrorContains(t, err, configPath)
+}
+
+func TestLoadPreservesConcurrentConfigEditWhenStateSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	original := "[default]\nregion = us-west-2\n"
+	externalEdit := "[default]\nregion = eu-west-1\n# edited by another process\n"
+	writeTestFile(t, configPath, original)
+	store := newFakeSecretStore()
+	var editErr error
+	var syncedConfig string
+	stateStore := &failingStateStore{
+		err: errors.New("state save failed"),
+		onSave: func() {
+			synced, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				editErr = readErr
+				return
+			}
+			syncedConfig = string(synced)
+			editErr = os.WriteFile(configPath, []byte(externalEdit), 0o600)
+		},
+	}
+	p := newConfiguredProfile(
+		configPath,
+		filepath.Join(dir, "credentials"),
+		"actool",
+		store,
+		stateStore,
+		nil,
+		nil,
+	)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+
+	_, err := p.Load()
+	assert.NilError(t, editErr)
+	assert.Assert(t, strings.Contains(syncedConfig, "credential_process = actool credential-process --profile default"))
+	assert.ErrorContains(t, err, "state save failed")
+	assert.ErrorContains(t, err, "config was not rolled back")
+	configData, readErr := os.ReadFile(configPath)
+	assert.NilError(t, readErr)
+	assert.Equal(t, string(configData), externalEdit)
+}
+
 func TestMigratesPreviousActoolSecureStore(t *testing.T) {
 	t.Parallel()
 
@@ -897,20 +1113,23 @@ func TestImportCredentialPlanRollsBackWhenSecretStoreSetFails(t *testing.T) {
 	assert.ErrorIs(t, bErr, errSecretNotFound)
 }
 
-func TestSyncConfigPreservesUnselectedCredentialSources(t *testing.T) {
+func TestSyncConfigPreservesAndRepairsCredentialSources(t *testing.T) {
 	cases := []struct {
 		name        string
 		key         string
 		value       string
+		wantKey     bool
 		wantProcess string
 	}{
-		{name: "role", key: "role_arn", value: "arn:aws:iam::123456789012:role/ReadOnly"},
-		{name: "source profile", key: "source_profile", value: "base"},
-		{name: "credential source", key: "credential_source", value: "Environment"},
-		{name: "web identity", key: "web_identity_token_file", value: "/tmp/token"},
-		{name: "sso", key: "sso_start_url", value: "https://example.awsapps.com/start"},
-		{name: "external process", key: CredentialProcess, value: "aws-vault exec keep -j", wantProcess: "aws-vault exec keep -j"},
-		{name: "static credential", key: AWSAccessKeyId, value: "CONFIGACCESSKEY"},
+		{name: "role", key: "role_arn", value: "arn:aws:iam::123456789012:role/ReadOnly", wantKey: true},
+		{name: "source profile", key: "source_profile", value: "base", wantKey: true},
+		{name: "credential source", key: "credential_source", value: "Environment", wantKey: true},
+		{name: "web identity", key: "web_identity_token_file", value: "/tmp/token", wantKey: true},
+		{name: "sso", key: "sso_start_url", value: "https://example.awsapps.com/start", wantKey: true},
+		{name: "empty sso session", key: "sso_session", wantProcess: "actool credential-process --profile keep"},
+		{name: "empty MFA serial", key: MFASerial, wantProcess: "actool credential-process --profile keep"},
+		{name: "external process", key: CredentialProcess, value: "aws-vault exec keep -j", wantKey: true, wantProcess: "aws-vault exec keep -j"},
+		{name: "static credential", key: AWSAccessKeyId, value: "CONFIGACCESSKEY", wantKey: true},
 	}
 
 	for _, tc := range cases {
@@ -928,8 +1147,96 @@ func TestSyncConfigPreservesUnselectedCredentialSources(t *testing.T) {
 			config, err := ini.Load(configPath)
 			assert.NilError(t, err)
 			section := config.Section("profile keep")
-			assert.Equal(t, section.Key(tc.key).String(), tc.value)
+			assert.Equal(t, section.HasKey(tc.key), tc.wantKey)
+			if tc.wantKey {
+				assert.Equal(t, section.Key(tc.key).String(), tc.value)
+			}
 			assert.Equal(t, section.Key(CredentialProcess).String(), tc.wantProcess)
+		})
+	}
+}
+
+func TestSyncConfigRepairsIncompleteSSOSource(t *testing.T) {
+	cases := []struct {
+		name        string
+		section     string
+		profileName string
+	}{
+		{name: "default profile", section: "default", profileName: Default},
+		{name: "selected profile", section: "profile keep", profileName: "keep"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config")
+			original := fmt.Sprintf("[%s]\nsso_session =\n", tc.section)
+			writeTestFile(t, configPath, original)
+			store := newFakeSecretStore()
+			p := newProfile(configPath, filepath.Join(dir, "credentials"), "actool", store, nil)
+			storeBaseCredential(t, p, tc.profileName, "ACCESSKEY", "SECRETKEY", nil)
+
+			_, err := p.Load()
+			assert.NilError(t, err)
+			config, readErr := ini.Load(configPath)
+			assert.NilError(t, readErr)
+			section, sectionErr := config.GetSection(tc.section)
+			assert.NilError(t, sectionErr)
+			assert.Assert(t, !section.HasKey("sso_session"))
+			defaultSection, defaultErr := config.GetSection(Default)
+			assert.NilError(t, defaultErr)
+			assert.Equal(t, defaultSection.Key(CredentialProcess).String(), p.credentialProcessCommand(tc.profileName))
+		})
+	}
+}
+
+func TestSyncConfigRepairsEmptySSOKeyWithoutOverwritingConfiguredSSO(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	writeTestFile(t, configPath, "[default]\n\n[profile keep]\nsso_start_url = https://example.awsapps.com/start\nsso_session =\n")
+	store := newFakeSecretStore()
+	p := newProfile(configPath, filepath.Join(dir, "credentials"), "actool", store, nil)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+	storeBaseCredential(t, p, "keep", "KEEPACCESSKEY", "KEEPSECRETKEY", nil)
+
+	_, err := p.Load()
+	assert.NilError(t, err)
+	config, err := ini.Load(configPath)
+	assert.NilError(t, err)
+	section := config.Section("profile keep")
+	assert.Equal(t, section.Key("sso_start_url").String(), "https://example.awsapps.com/start")
+	assert.Assert(t, !section.HasKey("sso_session"))
+	assert.Equal(t, section.Key(CredentialProcess).String(), "")
+}
+
+func TestLoadConfigReadsAndInheritsMFASerial(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	writeTestFile(t, configPath, "[default]\nmfa_serial = arn:aws:iam::123456789012:mfa/example-default\n\n[profile custom]\nmfa_serial = arn:aws:iam::123456789012:mfa/example-custom\n\n[profile inherited]\nregion = us-west-2\n")
+	store := newFakeSecretStore()
+	p := newProfile(configPath, filepath.Join(dir, "credentials"), "actool", store, nil)
+	storeBaseCredential(t, p, Default, "DEFAULTACCESSKEY", "DEFAULTSECRETKEY", nil)
+	storeBaseCredential(t, p, "custom", "CUSTOMACCESSKEY", "CUSTOMSECRETKEY", nil)
+	storeBaseCredential(t, p, "inherited", "INHERITEDACCESSKEY", "INHERITEDSECRETKEY", nil)
+
+	_, err := p.Load()
+	assert.NilError(t, err)
+
+	cases := []struct {
+		name       string
+		wantSerial string
+	}{
+		{name: Default, wantSerial: "arn:aws:iam::123456789012:mfa/example-default"},
+		{name: "custom", wantSerial: "arn:aws:iam::123456789012:mfa/example-custom"},
+		{name: "inherited", wantSerial: "arn:aws:iam::123456789012:mfa/example-default"},
+	}
+	model, err := p.Load()
+	assert.NilError(t, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			config, configErr := p.Config(model, tc.name)
+			assert.NilError(t, configErr)
+			assert.Equal(t, config.MFASerial, tc.wantSerial)
 		})
 	}
 }
