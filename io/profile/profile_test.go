@@ -23,6 +23,21 @@ type fakeSecretStore struct {
 	setCallKeys []string
 }
 
+type interleavingSecretStore struct {
+	*fakeSecretStore
+	afterSet func(string)
+}
+
+func (s *interleavingSecretStore) Set(key string, value []byte) error {
+	if err := s.fakeSecretStore.Set(key, value); err != nil {
+		return err
+	}
+	if s.afterSet != nil {
+		s.afterSet(key)
+	}
+	return nil
+}
+
 type failingStateStore struct {
 	err    error
 	onSave func()
@@ -817,6 +832,38 @@ func TestStoreSessionTokenKeepsExistingSessionWhenReplacementFails(t *testing.T)
 	assert.Assert(t, len(oldData) > 0)
 	_, newErr := store.Get(newKey)
 	assert.ErrorIs(t, newErr, errSecretNotFound)
+}
+
+func TestStoreSessionCredentialPreservesConcurrentReplacement(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			store := &interleavingSecretStore{fakeSecretStore: newFakeSecretStore()}
+			dir := t.TempDir()
+			first := newProfile(filepath.Join(dir, "config"), filepath.Join(dir, "credentials"), "actool", store, nil)
+			second := newProfile(filepath.Join(dir, "other-config"), filepath.Join(dir, "other-credentials"), "actool", store, nil)
+			expiration := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+			credential := func(offset time.Duration) *Credential {
+				expires := expiration.Add(offset)
+				return &Credential{Name: "dev", AccessKey: "FIXTUREACCESS", SecretKey: "FIXTURESECRET", SessionToken: "FIXTURETOKEN", Expiration: &expires, MFASerial: "mfa-1"}
+			}
+			if existing {
+				assert.NilError(t, first.storeSessionCredential(credential(-time.Hour)))
+			}
+			latest := credential(time.Second)
+			var concurrentErr error
+			store.afterSet = func(string) {
+				store.afterSet = nil
+				// Model a second process completing its replacement after the first
+				// process writes its token but before it enumerates obsolete keys.
+				concurrentErr = second.storeSessionCredential(latest)
+			}
+			assert.NilError(t, first.storeSessionCredential(credential(0)))
+			assert.NilError(t, concurrentErr)
+			latestKey := sessionKey(sessionMetadata{Type: sessionTypeGetSession, ProfileName: "dev", MFASerial: "mfa-1", Expiration: *latest.Expiration})
+			_, err := store.Get(latestKey)
+			assert.NilError(t, err, "a replacement must not delete a session written concurrently")
+		})
+	}
 }
 
 func TestSetSelectedDoesNotRollbackConfigWhenStateSaveFails(t *testing.T) {

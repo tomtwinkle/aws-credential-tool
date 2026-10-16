@@ -681,16 +681,18 @@ func (p *profile) storeSessionCredential(credential *Credential) error {
 		return err
 	}
 	newKey := sessionKey(metadata)
+	// Capture obsolete keys before publishing the replacement. Enumerating
+	// afterward could include another writer's new session and delete it.
+	keys, err := p.secrets.Keys()
+	if err != nil {
+		return err
+	}
 	// Write the replacement before deleting the old session. A keyring write
 	// can fail, and deleting first would make the still-valid session unusable.
 	if err := p.secrets.Set(newKey, encoded); err != nil {
 		return err
 	}
 
-	keys, err := p.secrets.Keys()
-	if err != nil {
-		return err
-	}
 	for _, key := range keys {
 		if key == newKey {
 			continue
