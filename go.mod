@@ -12,7 +12,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/magefile/mage v1.17.2
 	github.com/manifoldco/promptui v0.9.0
-	gopkg.in/ini.v1 v1.67.3
+	gopkg.in/ini.v1 v1.68.0
 	gotest.tools/v3 v3.5.2
 )
 
